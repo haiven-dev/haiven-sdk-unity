@@ -1,0 +1,29 @@
+<!--
+  IL2CPP strips what it cannot see being used, and it cannot see any of this.
+
+  Two distinct reasons, which is why one blanket rule would be the wrong shape:
+
+    - The callbacks JavaScript invokes are reached only through a native
+      function pointer. Nothing in managed code calls them, so a whole-program
+      analysis is correct to conclude they are dead — and stripping them turns
+      every inbound frame into a call through a pointer to nothing.
+
+    - The types the wire deserialises into are constructed reflectively by the
+      JSON reader. Their members are never named in code either, so a stripped
+      build parses frames into objects whose fields have all been removed, which
+      fails as a silently empty payload rather than as a missing type.
+
+  Preserved at assembly granularity deliberately. A member-level list is more
+  precise and would have to be re-audited on every field added to the protocol —
+  and the failure it guards against is silent, so the audit that gets skipped is
+  the one nobody notices skipping.
+
+  UNVERIFIED against a real IL2CPP build: there is no Unity installation in this
+  repository, so this file is written from the documented stripping behaviour
+  rather than from a failure it was observed to fix. Confirm it before trusting
+  it, and confirm it by REMOVING it and watching a WebGL build break — a link.xml
+  that was never needed and a link.xml that works look identical.
+-->
+<linker>
+  <assembly fullname="Haiven.Sdk" preserve="all" />
+</linker>
