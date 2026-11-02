@@ -14,8 +14,9 @@ Add it by git URL in the Package Manager, or in `Packages/manifest.json`:
 }
 ```
 
-Minimum editor version is `2021.3`, which is what `netstandard2.1` and the
-`.jslib` conventions here assume.
+Minimum editor version is `6000.0` (Unity 6.0 LTS). The package still targets
+`netstandard2.1` and the WebGL `.jslib` plugin layout. The host pins editor
+`6000.0.52f1`.
 
 ## Choosing a socket
 

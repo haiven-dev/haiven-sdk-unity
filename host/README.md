@@ -8,14 +8,14 @@ Unity API is compiled into this host.
 
 ## Runner setup and activation
 
-Use an activated Linux **Unity 2022.3.62f2 (7670c08855a9)** editor with the matching
+Use an activated Linux **Unity 6000.0.52f1 (9e4086222921)** editor with the matching
 **WebGL Build Support** module, installed at
-`/opt/unity/2022.3.62f2/Editor/Unity`. The matching module includes Unity's
+`/opt/unity/6000.0.52f1/Editor/Unity`. The matching module includes Unity's
 IL2CPP/Emscripten toolchain. The engine checks both its version and module
-availability before the build. [Official editor and module downloads](https://unity.com/releases/editor/whats-new/2022.3.62f2).
+availability before the build. [Official editor and module downloads](https://unity.com/releases/editor/whats-new/6000.0.52f1).
 
 Register an isolated self-hosted runner with labels `linux`, `x64`, and
-`unity-2022.3.62f2-webgl`. Activate the editor under the same OS account that runs
+`unity-6000.0.52f1-webgl`. Activate the editor under the same OS account that runs
 the Actions agent using your organization's Unity entitlement; verify an editor
 launch succeeds under that account. Credentials belong in the runner's license
 service or the local secret store, not this repository or command logs. Install Python 3,
@@ -33,7 +33,7 @@ triggers and require its status check. Do not count static checks as engine proo
 ```sh
 npm ci --prefix csharp/unity/ci
 (cd csharp/unity/ci && npx --no-install playwright install chromium)
-UNITY_EDITOR=/opt/unity/2022.3.62f2/Editor/Unity python3 csharp/unity/ci/run.py
+UNITY_EDITOR=/opt/unity/6000.0.52f1/Editor/Unity python3 csharp/unity/ci/run.py
 ```
 
 Run from the SDK root. Logs and NUnit XML remain in `build/unity-results/`.

@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -25,5 +26,21 @@ class ReportTests(unittest.TestCase):
                     if valid: runner.verify_report(path, {"expected"})
                     else:
                         with self.assertRaises(RuntimeError): runner.verify_report(path, {"expected"})
+
+    def test_editor_pin_is_unity_6_0(self):
+        root = Path(__file__).resolve().parents[1]
+        self.assertEqual(runner.VERSION, "6000.0.52f1")
+        manifest = json.loads((root / "com.haiven.sdk/package.json").read_text())
+        self.assertEqual(manifest["unity"], "6000.0")
+        version = (root / "host/ProjectSettings/ProjectVersion.txt").read_text()
+        self.assertEqual(
+            version,
+            "m_EditorVersion: 6000.0.52f1\n"
+            "m_EditorVersionWithRevision: 6000.0.52f1 (9e4086222921)\n",
+        )
+        build = (root / "host/Assets/Editor/HaivenBuild.cs").read_text()
+        self.assertEqual(build.count(runner.VERSION), 2)
+        browser = (root / "ci/browser.mjs").read_text()
+        self.assertIn(f'unity:"{runner.VERSION}"', browser)
 
 if __name__ == "__main__": unittest.main()
