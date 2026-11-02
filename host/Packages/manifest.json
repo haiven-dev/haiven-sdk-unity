@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "com.haiven.sdk": "file:../../com.haiven.sdk",
+    "com.unity.test-framework": "1.1.33"
+  }
+}

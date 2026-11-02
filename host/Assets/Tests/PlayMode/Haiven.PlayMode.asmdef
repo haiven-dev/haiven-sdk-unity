@@ -1,0 +1,9 @@
+{
+  "name": "Haiven.PlayMode",
+  "references": [
+    
+  ],
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ]
+}
