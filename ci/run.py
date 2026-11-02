@@ -12,7 +12,7 @@ import xml.etree.ElementTree as ET
 HERE = Path(__file__).resolve().parent
 SDK = HERE.parents[2]
 HOST = HERE.parent / "host"
-VERSION = "2022.3.62f2"
+VERSION = "6000.0.52f1"
 EXPECTED = {
     "EditMode": {"Haiven.Tests.ProtocolTests.LocalPackageLoads", "Haiven.Tests.ProtocolTests.RefusedReplyPreservesPresence", "Haiven.Tests.ProtocolTests.EventHasNoSuccessOrRequestId", "Haiven.Tests.ProtocolTests.HandoffDispatcherRunsOnUnityThread"},
     "PlayMode": {"Haiven.Tests.SocketTests.SocketRoundTripAndReconnect", "Haiven.Tests.HandoffTests.DeepLinkStoresTokenAndCompletesOnUnityThread"},

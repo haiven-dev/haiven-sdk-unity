@@ -9,7 +9,7 @@ public static class HaivenBuild
 {
     public static void WebGL()
     {
-        if (Application.unityVersion != "2022.3.62f2") throw new Exception("Unexpected Unity version: " + Application.unityVersion);
+        if (Application.unityVersion != "6000.0.52f1") throw new Exception("Unexpected Unity version: " + Application.unityVersion);
         if (!BuildPipeline.IsBuildTargetSupported(BuildTargetGroup.WebGL, BuildTarget.WebGL)) throw new Exception("WebGL module missing");
         EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
         new GameObject("Haiven smoke").AddComponent<WebGlSmoke>();
@@ -25,6 +25,6 @@ public static class HaivenBuild
             target = BuildTarget.WebGL, options = BuildOptions.None
         });
         if (report.summary.result != BuildResult.Succeeded) throw new Exception("WebGL build failed: " + report.summary.result);
-        File.WriteAllText(Path.Combine(output, "haiven-build.json"), "{\"unity\":\"2022.3.62f2\",\"stripping\":\"High\",\"result\":\"Succeeded\"}");
+        File.WriteAllText(Path.Combine(output, "haiven-build.json"), "{\"unity\":\"6000.0.52f1\",\"stripping\":\"High\",\"result\":\"Succeeded\"}");
     }
 }

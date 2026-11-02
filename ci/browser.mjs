@@ -5,7 +5,7 @@ import { join } from "node:path";
 const output = process.env.HAIVEN_WEBGL_OUTPUT;
 const report = join(process.env.HAIVEN_UNITY_RESULTS, "browser.json");
 const build = JSON.parse(await readFile(join(output, "haiven-build.json"), "utf8"));
-assert.deepEqual(build, { unity:"2022.3.62f2", stripping:"High", result:"Succeeded" });
+assert.deepEqual(build, { unity:"6000.0.52f1", stripping:"High", result:"Succeeded" });
 const origin = "http://127.0.0.1:18765";
 const before = await (await fetch(origin + "/stats")).json();
 const browser = await chromium.launch({headless:true, args:["--enable-unsafe-swiftshader"]});
