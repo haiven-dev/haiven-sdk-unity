@@ -40,7 +40,11 @@ ROOT = Path(__file__).resolve().parent.parent
 PACKAGE_DIR = ROOT / "com.haiven.sdk"
 CORE_PROJECT = ROOT / "core" / "Haiven.Sdk.Core.csproj"
 NAME = "com.haiven.sdk"
-SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
+# SemVer with an optional prerelease (0.1.0-alpha.1). 0.0.0 is legal in
+# package.json; resolve_version refuses to tag that development sentinel.
+SEMVER = re.compile(
+    r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
+)
 
 
 class ReleaseError(Exception):
@@ -63,14 +67,16 @@ def resolve_version(tag):
     if manifest.get("name") != NAME:
         raise ReleaseError(f"package.json name is {manifest.get('name')!r}, expected {NAME!r}")
     if not SEMVER.match(version):
-        raise ReleaseError(f"package.json version {version!r} is not a plain MAJOR.MINOR.PATCH")
+        raise ReleaseError(f"package.json version {version!r} is not MAJOR.MINOR.PATCH[-PRERELEASE]")
     if tag:
         if not tag.startswith("v") or not SEMVER.match(tag[1:]):
-            raise ReleaseError(f"tag {tag!r} is not v<MAJOR>.<MINOR>.<PATCH>")
+            raise ReleaseError(f"tag {tag!r} is not vMAJOR.MINOR.PATCH[-PRERELEASE]")
         if tag[1:] != version:
             raise ReleaseError(
                 f"tag {tag} does not match com.haiven.sdk/package.json version {version}; "
                 f"bump package.json to {tag[1:]} on main before tagging")
+        if version == "0.0.0":
+            raise ReleaseError("0.0.0 is a development sentinel and must not be tagged")
     return version
 
 
@@ -215,9 +221,36 @@ def write_zip(path, files, mtime):
 
 # --- the engine-free core ---------------------------------------------------
 
-def build_core(out, version, dotnet_sdk, mtime):
+def build_core(out, version, dotnet_sdk, mtime, tag):
     if not (dotnet_sdk / "Haiven.Sdk").is_dir():
         raise ReleaseError(f"{dotnet_sdk}/Haiven.Sdk not found; check out haiven-dev/haiven-sdk-dotnet there")
+    # global.json lives in the dotnet checkout, which is not a parent of the
+    # csproj, so dotnet would otherwise ignore its rollForward disable and
+    # float to whatever 10.0.x is installed. Copy it to the repo root for this
+    # publish when that SDK is actually installed.
+    pin_version = dotnet_pin(dotnet_sdk)
+    pin_target = ROOT / "global.json"
+    remove_pin = False
+    if pin_version and dotnet_pin_installed(pin_version):
+        if not pin_target.exists():
+            shutil.copyfile(dotnet_sdk / "global.json", pin_target)
+            remove_pin = True
+        print(f"note: pinning dotnet publish to SDK {pin_version}", file=sys.stderr)
+    elif pin_version and tag:
+        raise ReleaseError(
+            f".NET SDK {pin_version} from {dotnet_sdk / 'global.json'} is not installed; "
+            "a tagged release must use that SDK")
+    elif pin_version:
+        print(f"note: .NET SDK {pin_version} is not installed; publishing with the default SDK",
+              file=sys.stderr)
+    try:
+        return _publish_core(out, version, dotnet_sdk, mtime)
+    finally:
+        if remove_pin:
+            pin_target.unlink(missing_ok=True)
+
+
+def _publish_core(out, version, dotnet_sdk, mtime):
     with tempfile.TemporaryDirectory(dir=out.parent) as scratch:
         publish = Path(scratch) / "publish"
         subprocess.run([
@@ -240,21 +273,89 @@ def sha256sums(out):
     lines = []
     for path in sorted(p for p in out.iterdir() if p.is_file() and p.name != "SHA256SUMS"):
         lines.append(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n")
-    (out / "SHA256SUMS").write_text("".join(lines))
+    # write_bytes keeps the LF written above. write_text would emit CRLF on
+    # Windows, and sha256sum -c would then look for names ending in CR.
+    (out / "SHA256SUMS").write_bytes("".join(lines).encode())
+
+
+def assert_same_assets(existing, built):
+    """Fail when a published tag's assets are not byte-identical to this build."""
+    def digests(directory):
+        if not directory.is_dir():
+            raise ReleaseError(f"{directory} is not a directory")
+        found = {}
+        for path in sorted(directory.iterdir()):
+            if path.is_file():
+                found[path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
+        if not found:
+            raise ReleaseError(f"{directory} has no release assets")
+        return found
+
+    left, right = digests(existing), digests(built)
+    if left.keys() != right.keys():
+        missing = sorted(set(right) - set(left))
+        extra = sorted(set(left) - set(right))
+        raise ReleaseError(
+            "existing release assets do not match this build "
+            f"(missing {missing}, extra {extra}); publish a new version "
+            "instead of replacing this tag")
+    changed = [name for name in left if left[name] != right[name]]
+    if changed:
+        raise ReleaseError(
+            "existing release assets differ for " + ", ".join(changed)
+            + "; publish a new version instead of replacing this tag")
+    print("existing release assets match this build; leaving them in place")
+
+
+def assert_output_safe(out, dotnet_sdk):
+    """--out is deleted before inputs are read. Refuse a path that would eat them."""
+    if out == ROOT or out in ROOT.parents:
+        raise ReleaseError(f"--out {out} is the repository or an ancestor of it")
+    protected = [PACKAGE_DIR, ROOT / "core", ROOT / "ci", dotnet_sdk]
+    for path in protected:
+        if out == path or out in path.parents or path in out.parents:
+            raise ReleaseError(f"--out {out} overlaps release input {path}")
+
+
+def dotnet_pin(dotnet_sdk):
+    pin = dotnet_sdk / "global.json"
+    if not pin.is_file():
+        return None
+    try:
+        version = json.loads(pin.read_text()).get("sdk", {}).get("version")
+    except (OSError, json.JSONDecodeError):
+        return None
+    return version or None
+
+
+def dotnet_pin_installed(version):
+    listed = subprocess.run(["dotnet", "--list-sdks"], capture_output=True, text=True)
+    if listed.returncode != 0:
+        return False
+    return any(line.split(" ", 1)[0] == version for line in listed.stdout.splitlines() if line.strip())
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--out", required=True, type=Path, help="directory for release assets (emptied first)")
-    parser.add_argument("--tag", default="", help="release tag; must equal v<package.json version>")
+    parser.add_argument("--out", required=True, type=Path,
+                        help="directory for release assets (emptied first, unless --compare-to is set)")
+    parser.add_argument("--tag", default="",
+                        help="release tag; must equal v<package.json version>, and must not be v0.0.0")
     parser.add_argument("--dotnet-sdk", type=Path, default=ROOT.parent / "haiven-sdk-dotnet",
                         help="haiven-sdk-dotnet checkout providing Haiven.Sdk/*.cs")
     parser.add_argument("--notes", type=Path, help="also write release notes here (outside --out)")
+    parser.add_argument("--compare-to", type=Path,
+                        help="compare this existing asset directory to --out and exit without building or deleting")
     args = parser.parse_args()
+    if args.compare_to:
+        assert_same_assets(args.compare_to.resolve(), args.out.resolve())
+        return
 
     version = resolve_version(args.tag)
     mtime = source_date_epoch()
     out = args.out.resolve()
+    dotnet_sdk = args.dotnet_sdk.resolve()
+    assert_output_safe(out, dotnet_sdk)
     if out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True)
@@ -265,13 +366,14 @@ def main():
               f"(none are tracked): {', '.join(generated)}", file=sys.stderr)
     upm_tarball(out / f"{NAME}-{version}.tgz", entries, mtime)
     unitypackage(out / f"{NAME}-{version}.unitypackage", entries, mtime)
-    core_dlls = build_core(out, version, args.dotnet_sdk, mtime)
+    core_dlls = build_core(out, version, dotnet_sdk, mtime, args.tag)
     sha256sums(out)
 
     if args.notes:
-        dotnet_rev = subprocess.run(["git", "-C", str(args.dotnet_sdk), "rev-parse", "HEAD"],
+        dotnet_rev = subprocess.run(["git", "-C", str(dotnet_sdk), "rev-parse", "HEAD"],
                                     capture_output=True, text=True).stdout.strip() or "unknown"
-        args.notes.write_text(
+        # Same LF rule as SHA256SUMS: write_text would use CRLF on Windows.
+        args.notes.write_bytes((
             f"com.haiven.sdk {version}\n\n"
             f"- UPM tarball: `{NAME}-{version}.tgz` (install with `file:` path or a tarball URL)\n"
             f"- Unity package: `{NAME}-{version}.unitypackage` (imports as an embedded package under `Packages/{NAME}/`)\n"
@@ -280,7 +382,7 @@ def main():
             f"- `haiven-sdk-core-{version}-netstandard2.1.zip`: the core plus its managed dependencies "
             f"({', '.join(core_dlls)}); place under `Assets/Plugins/` - the UPM package does not bundle them\n"
             f"- The Unity bridge assembly (`Haiven.Sdk`) ships as source in the package; Unity compiles it.\n\n"
-            f"Verify downloads with `sha256sum -c SHA256SUMS`.\n")
+            f"Verify downloads with `sha256sum -c SHA256SUMS`.\n").encode())
 
     for path in sorted(out.iterdir()):
         print(f"{path.stat().st_size:>10}  {path.name}")
