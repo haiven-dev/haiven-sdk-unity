@@ -1,0 +1,293 @@
+#!/usr/bin/env python3
+"""Build the GitHub release assets for com.haiven.sdk.
+
+Produces, in --out:
+
+  com.haiven.sdk-<version>.tgz            UPM tarball (npm-pack layout, root package/)
+  com.haiven.sdk-<version>.unitypackage   the same package, rooted at Packages/com.haiven.sdk/
+  Haiven.Sdk.Core.dll / .pdb              the engine-free C# core, netstandard2.1
+  haiven-sdk-core-<version>-netstandard2.1.zip
+                                          the core plus the System.Text.Json closure it
+                                          needs, i.e. what a project drops into Assets/Plugins
+  SHA256SUMS                              sha256sum-format digests of every file above
+
+The Unity bridge assembly (Haiven.Sdk, Runtime/Haiven.Sdk.asmdef) is NOT built
+here: it references UnityEngine, and Unity's managed assemblies are not
+redistributable. It ships as source inside the package and Unity compiles it.
+
+Every archive is reproducible: entries are sorted, owners are 0, modes are
+fixed, and timestamps come from SOURCE_DATE_EPOCH or the HEAD commit time.
+
+  python3 ci/release.py --out build/release [--tag v1.2.3] [--dotnet-sdk ../haiven-sdk-dotnet]
+"""
+import argparse
+import gzip
+import hashlib
+import io
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import time
+import zipfile
+
+ROOT = Path(__file__).resolve().parent.parent
+PACKAGE_DIR = ROOT / "com.haiven.sdk"
+CORE_PROJECT = ROOT / "core" / "Haiven.Sdk.Core.csproj"
+NAME = "com.haiven.sdk"
+SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
+
+
+class ReleaseError(Exception):
+    pass
+
+
+def git(*args):
+    return subprocess.check_output(["git", "-C", str(ROOT), *args], text=True)
+
+
+def source_date_epoch():
+    if os.environ.get("SOURCE_DATE_EPOCH"):
+        return int(os.environ["SOURCE_DATE_EPOCH"])
+    return int(git("log", "-1", "--format=%ct").strip())
+
+
+def resolve_version(tag):
+    manifest = json.loads((PACKAGE_DIR / "package.json").read_text())
+    version = manifest.get("version", "")
+    if manifest.get("name") != NAME:
+        raise ReleaseError(f"package.json name is {manifest.get('name')!r}, expected {NAME!r}")
+    if not SEMVER.match(version):
+        raise ReleaseError(f"package.json version {version!r} is not a plain MAJOR.MINOR.PATCH")
+    if tag:
+        if not tag.startswith("v") or not SEMVER.match(tag[1:]):
+            raise ReleaseError(f"tag {tag!r} is not v<MAJOR>.<MINOR>.<PATCH>")
+        if tag[1:] != version:
+            raise ReleaseError(
+                f"tag {tag} does not match com.haiven.sdk/package.json version {version}; "
+                f"bump package.json to {tag[1:]} on main before tagging")
+    return version
+
+
+# --- package contents and .meta files ---------------------------------------
+#
+# Unity treats a package installed from a git URL, a registry, or a tarball as
+# immutable and refuses to generate .meta files for it: any asset without one
+# is ignored with "has no meta file, but it's in an immutable folder". The
+# repository carries no .meta files today, so they are generated here. The GUID
+# is derived from the package-relative path, which keeps it stable across
+# releases (a reference a project makes to an asset in 0.1.0 still resolves in
+# 0.2.0). A tracked .meta, if one is ever committed, always wins.
+
+def package_files():
+    tracked = git("ls-files", "-z", "--", str(PACKAGE_DIR.relative_to(ROOT))).split("\0")
+    files = sorted(Path(p).relative_to(PACKAGE_DIR.relative_to(ROOT)).as_posix() for p in tracked if p)
+    if not files:
+        raise ReleaseError("no tracked files under com.haiven.sdk/")
+    return files
+
+
+def guid_for(rel):
+    return hashlib.md5(f"{NAME}/{rel}".encode()).hexdigest()
+
+
+def generated_meta(rel, is_dir):
+    guid = guid_for(rel)
+    head = f"fileFormatVersion: 2\nguid: {guid}\n"
+    tail = "  userData: \n  assetBundleName: \n  assetBundleVariant: \n"
+    if is_dir:
+        return head + "folderAsset: yes\nDefaultImporter:\n  externalObjects: {}\n" + tail
+    suffix = Path(rel).suffix
+    if suffix == ".cs":
+        return head + ("MonoImporter:\n  externalObjects: {}\n  serializedVersion: 2\n"
+                       "  defaultReferences: []\n  executionOrder: 0\n  icon: {instanceID: 0}\n") + tail
+    if suffix == ".asmdef":
+        return head + "AssemblyDefinitionImporter:\n  externalObjects: {}\n" + tail
+    if rel == "package.json":
+        return head + "PackageManifestImporter:\n  externalObjects: {}\n" + tail
+    if suffix == ".jslib":
+        # A .jslib is only meaningful in a WebGL player; say so explicitly
+        # instead of relying on folder-name inference.
+        return head + (
+            "PluginImporter:\n  externalObjects: {}\n  serializedVersion: 2\n  iconMap: {}\n"
+            "  executionOrder: {}\n  defineConstraints: []\n  isPreloaded: 0\n  isOverridable: 0\n"
+            "  isExplicitlyReferenced: 0\n  validateReferences: 1\n  platformData:\n"
+            "  - first:\n      Any: \n    second:\n      enabled: 0\n      settings: {}\n"
+            "  - first:\n      Editor: Editor\n    second:\n      enabled: 0\n"
+            "      settings:\n        DefaultValueInitialized: true\n"
+            "  - first:\n      WebGL: WebGL\n    second:\n      enabled: 1\n      settings: {}\n") + tail
+    if suffix in {".md", ".xml", ".txt", ".json"}:
+        return head + "TextScriptImporter:\n  externalObjects: {}\n" + tail
+    return head + "DefaultImporter:\n  externalObjects: {}\n" + tail
+
+
+def package_entries():
+    """(relative path, bytes or None for a folder, meta text) for every asset and folder."""
+    files = package_files()
+    assets = [f for f in files if not f.endswith(".meta")]
+    tracked_meta = {f[:-len(".meta")] for f in files if f.endswith(".meta")}
+    folders = sorted({p.as_posix() for f in assets for p in Path(f).parents if p.as_posix() != "."})
+    entries, generated = [], []
+    for rel in sorted(folders + assets):
+        is_dir = rel in folders
+        if rel in tracked_meta:
+            meta = (PACKAGE_DIR / (rel + ".meta")).read_text()
+        else:
+            meta = generated_meta(rel, is_dir)
+            generated.append(rel)
+        entries.append((rel, None if is_dir else (PACKAGE_DIR / rel).read_bytes(), meta))
+    return entries, generated
+
+
+def meta_guid(meta):
+    match = re.search(r"^guid: ([0-9a-f]{32})$", meta, re.M)
+    if not match:
+        raise ReleaseError("a .meta file has no 32-hex guid")
+    return match.group(1)
+
+
+# --- reproducible archives --------------------------------------------------
+
+def add_bytes(tar, name, data, mtime, mode=0o644):
+    info = tarfile.TarInfo(name)
+    info.size, info.mtime, info.mode = len(data), mtime, mode
+    info.uid = info.gid = 0
+    info.uname = info.gname = ""
+    tar.addfile(info, io.BytesIO(data))
+
+
+def add_dir(tar, name, mtime):
+    info = tarfile.TarInfo(name)
+    info.type, info.mtime, info.mode = tarfile.DIRTYPE, mtime, 0o755
+    info.uid = info.gid = 0
+    info.uname = info.gname = ""
+    tar.addfile(info)
+
+
+def write_tgz(path, build, mtime):
+    raw = io.BytesIO()
+    with tarfile.open(fileobj=raw, mode="w", format=tarfile.PAX_FORMAT) as tar:
+        build(tar)
+    with open(path, "wb") as out, gzip.GzipFile(filename="", fileobj=out, mode="wb", mtime=mtime) as gz:
+        gz.write(raw.getvalue())
+
+
+def upm_tarball(path, entries, mtime):
+    def build(tar):
+        for rel, data, meta in entries:
+            if data is not None:
+                add_bytes(tar, f"package/{rel}", data, mtime)
+            add_bytes(tar, f"package/{rel}.meta", meta.encode(), mtime)
+    write_tgz(path, build, mtime)
+
+
+def unitypackage(path, entries, mtime):
+    # Rooted at Packages/<name>/ rather than Assets/: importing it creates an
+    # embedded package with the same identity, asmdef, and package.json as the
+    # UPM install, instead of loose scripts under Assets/ that a later UPM
+    # install would duplicate. The package root folder has no .meta in Unity,
+    # so only its contents get entries.
+    def build(tar):
+        for rel, data, meta in sorted(entries, key=lambda e: meta_guid(e[2])):
+            guid = meta_guid(meta)
+            add_dir(tar, guid, mtime)
+            if data is not None:
+                add_bytes(tar, f"{guid}/asset", data, mtime)
+            add_bytes(tar, f"{guid}/asset.meta", meta.encode(), mtime)
+            add_bytes(tar, f"{guid}/pathname", f"Packages/{NAME}/{rel}".encode(), mtime)
+    write_tgz(path, build, mtime)
+
+
+def write_zip(path, files, mtime):
+    stamp = time.gmtime(max(mtime, 315532800))[:6]  # zip cannot represent dates before 1980
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, source in sorted(files.items()):
+            info = zipfile.ZipInfo(name, stamp)
+            info.external_attr = 0o644 << 16
+            info.compress_type = zipfile.ZIP_DEFLATED
+            archive.writestr(info, source.read_bytes())
+
+
+# --- the engine-free core ---------------------------------------------------
+
+def build_core(out, version, dotnet_sdk, mtime):
+    if not (dotnet_sdk / "Haiven.Sdk").is_dir():
+        raise ReleaseError(f"{dotnet_sdk}/Haiven.Sdk not found; check out haiven-dev/haiven-sdk-dotnet there")
+    with tempfile.TemporaryDirectory(dir=out.parent) as scratch:
+        publish = Path(scratch) / "publish"
+        subprocess.run([
+            "dotnet", "publish", str(CORE_PROJECT), "-c", "Release", "-o", str(publish),
+            f"-p:HaivenSdkDotnetDir={dotnet_sdk.resolve()}", f"-p:Version={version}",
+            "-p:ContinuousIntegrationBuild=true", "-p:Deterministic=true",
+        ], check=True)
+        dlls = {p.name: p for p in publish.glob("*.dll")}
+        if "Haiven.Sdk.Core.dll" not in dlls:
+            raise ReleaseError("dotnet publish produced no Haiven.Sdk.Core.dll")
+        for name in ["Haiven.Sdk.Core.dll", "Haiven.Sdk.Core.pdb"]:
+            shutil.copyfile(publish / name, out / name)
+        # Same set ci/run.py installs into the host's Assets/Plugins/Core:
+        # every managed DLL, nothing else. Unity supplies the platform itself.
+        write_zip(out / f"haiven-sdk-core-{version}-netstandard2.1.zip", dlls, mtime)
+        return sorted(dlls)
+
+
+def sha256sums(out):
+    lines = []
+    for path in sorted(p for p in out.iterdir() if p.is_file() and p.name != "SHA256SUMS"):
+        lines.append(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n")
+    (out / "SHA256SUMS").write_text("".join(lines))
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--out", required=True, type=Path, help="directory for release assets (emptied first)")
+    parser.add_argument("--tag", default="", help="release tag; must equal v<package.json version>")
+    parser.add_argument("--dotnet-sdk", type=Path, default=ROOT.parent / "haiven-sdk-dotnet",
+                        help="haiven-sdk-dotnet checkout providing Haiven.Sdk/*.cs")
+    parser.add_argument("--notes", type=Path, help="also write release notes here (outside --out)")
+    args = parser.parse_args()
+
+    version = resolve_version(args.tag)
+    mtime = source_date_epoch()
+    out = args.out.resolve()
+    if out.exists():
+        shutil.rmtree(out)
+    out.mkdir(parents=True)
+
+    entries, generated = package_entries()
+    if generated:
+        print(f"note: generated {len(generated)} .meta file(s) with path-derived GUIDs "
+              f"(none are tracked): {', '.join(generated)}", file=sys.stderr)
+    upm_tarball(out / f"{NAME}-{version}.tgz", entries, mtime)
+    unitypackage(out / f"{NAME}-{version}.unitypackage", entries, mtime)
+    core_dlls = build_core(out, version, args.dotnet_sdk, mtime)
+    sha256sums(out)
+
+    if args.notes:
+        dotnet_rev = subprocess.run(["git", "-C", str(args.dotnet_sdk), "rev-parse", "HEAD"],
+                                    capture_output=True, text=True).stdout.strip() or "unknown"
+        args.notes.write_text(
+            f"com.haiven.sdk {version}\n\n"
+            f"- UPM tarball: `{NAME}-{version}.tgz` (install with `file:` path or a tarball URL)\n"
+            f"- Unity package: `{NAME}-{version}.unitypackage` (imports as an embedded package under `Packages/{NAME}/`)\n"
+            f"- Engine-free core: `Haiven.Sdk.Core.dll` (netstandard2.1), built from "
+            f"haiven-dev/haiven-sdk-dotnet@{dotnet_rev}\n"
+            f"- `haiven-sdk-core-{version}-netstandard2.1.zip`: the core plus its managed dependencies "
+            f"({', '.join(core_dlls)}); place under `Assets/Plugins/` - the UPM package does not bundle them\n"
+            f"- The Unity bridge assembly (`Haiven.Sdk`) ships as source in the package; Unity compiles it.\n\n"
+            f"Verify downloads with `sha256sum -c SHA256SUMS`.\n")
+
+    for path in sorted(out.iterdir()):
+        print(f"{path.stat().st_size:>10}  {path.name}")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (ReleaseError, subprocess.CalledProcessError, OSError) as error:
+        sys.exit(f"release: {error}")

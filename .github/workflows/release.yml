@@ -1,0 +1,101 @@
+name: Release
+
+# A v* tag builds the release assets and publishes them as a GitHub release.
+# A manual dispatch builds the same assets and keeps them as a workflow
+# artifact only; it never publishes.
+#
+# The tag must equal v<com.haiven.sdk/package.json version>: bump the version
+# on main first, then tag that commit. ci/release.py fails the build otherwise.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # The core project compiles ../../haiven-sdk-dotnet/Haiven.Sdk/*.cs, so the
+      # two repositories are checked out side by side.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: haiven-sdk-unity
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Read the haiven-sdk-dotnet pin
+        id: pin
+        run: |
+          ref="$(tr -d '[:space:]' < haiven-sdk-unity/ci/haiven-sdk-dotnet.ref)"
+          if ! [[ "$ref" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::ci/haiven-sdk-dotnet.ref must hold a full commit SHA"
+            exit 1
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: haiven-dev/haiven-sdk-dotnet
+          ref: ${{ steps.pin.outputs.ref }}
+          path: haiven-sdk-dotnet
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Validate the package layout
+        run: node haiven-sdk-unity/validate-package.mjs
+
+      - name: Build release assets
+        env:
+          TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: |
+          args=(--out release/assets --notes release/notes.md --dotnet-sdk haiven-sdk-dotnet)
+          if [[ -n "$TAG" ]]; then args+=(--tag "$TAG"); fi
+          python3 haiven-sdk-unity/ci/release.py "${args[@]}"
+          (cd release/assets && sha256sum -c SHA256SUMS)
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: haiven-sdk-unity-release
+          path: release/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: haiven-sdk-unity-release
+          path: release
+
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          (cd release/assets && sha256sum -c SHA256SUMS)
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            # A re-run replaces the assets on the existing release.
+            gh release upload "$TAG" release/assets/* --clobber
+          else
+            gh release create "$TAG" release/assets/* \
+              --verify-tag --title "$TAG" --notes-file release/notes.md
+          fi
