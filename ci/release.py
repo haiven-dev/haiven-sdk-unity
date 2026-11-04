@@ -224,18 +224,20 @@ def write_zip(path, files, mtime):
 def build_core(out, version, dotnet_sdk, mtime, tag):
     if not (dotnet_sdk / "Haiven.Sdk").is_dir():
         raise ReleaseError(f"{dotnet_sdk}/Haiven.Sdk not found; check out haiven-dev/haiven-sdk-dotnet there")
-    # global.json lives in the dotnet checkout, which is not a parent of the
-    # csproj, so dotnet would otherwise ignore its rollForward disable and
-    # float to whatever 10.0.x is installed. Copy it to the repo root for this
-    # publish when that SDK is actually installed.
+    # dotnet discovers global.json by walking upward from its process working
+    # directory, not from the csproj. The release workflow runs this script
+    # from the workspace parent and does not set working-directory: --out and
+    # --dotnet-sdk are relative to that parent. A pin copied to ROOT is not on
+    # that walk, so the copy alone does not pin publish. Publish with ROOT as
+    # its working directory, and fail when the SDK resolved there is not the pin.
     pin_version = dotnet_pin(dotnet_sdk)
     pin_target = ROOT / "global.json"
     remove_pin = False
-    if pin_version and dotnet_pin_installed(pin_version):
+    pinned = bool(pin_version and dotnet_pin_installed(pin_version))
+    if pinned:
         if not pin_target.exists():
             shutil.copyfile(dotnet_sdk / "global.json", pin_target)
             remove_pin = True
-        print(f"note: pinning dotnet publish to SDK {pin_version}", file=sys.stderr)
     elif pin_version and tag:
         raise ReleaseError(
             f".NET SDK {pin_version} from {dotnet_sdk / 'global.json'} is not installed; "
@@ -244,20 +246,46 @@ def build_core(out, version, dotnet_sdk, mtime, tag):
         print(f"note: .NET SDK {pin_version} is not installed; publishing with the default SDK",
               file=sys.stderr)
     try:
+        if pinned:
+            assert_pinned_sdk(pin_version)
+            print(f"note: pinning dotnet publish to SDK {pin_version}", file=sys.stderr)
         return _publish_core(out, version, dotnet_sdk, mtime)
     finally:
         if remove_pin:
             pin_target.unlink(missing_ok=True)
 
 
+def assert_pinned_sdk(pin_version):
+    """Fail unless `dotnet`, started in ROOT, resolves pin_version."""
+    selected = subprocess.run(
+        ["dotnet", "--version"], cwd=ROOT, capture_output=True, text=True)
+    chosen = selected.stdout.strip()
+    if selected.returncode == 0 and chosen == pin_version:
+        return
+    if selected.returncode != 0:
+        requested = next((
+            line.strip() for line in selected.stderr.splitlines()
+            if line.startswith("Requested SDK version:")
+        ), "")
+        extra = f"; {requested}" if requested else ""
+        raise ReleaseError(
+            f"dotnet in {ROOT} did not select pin {pin_version} "
+            f"(exit {selected.returncode}){extra}")
+    raise ReleaseError(f"dotnet in {ROOT} selected SDK {chosen}, not pin {pin_version}")
+
+
 def _publish_core(out, version, dotnet_sdk, mtime):
     with tempfile.TemporaryDirectory(dir=out.parent) as scratch:
-        publish = Path(scratch) / "publish"
+        # Absolute paths: cwd is ROOT, while the workflow's --out and
+        # --dotnet-sdk are relative to the workspace parent.
+        publish = (Path(scratch) / "publish").resolve()
+        project = CORE_PROJECT.resolve()
+        sdk_dir = dotnet_sdk.resolve()
         subprocess.run([
-            "dotnet", "publish", str(CORE_PROJECT), "-c", "Release", "-o", str(publish),
-            f"-p:HaivenSdkDotnetDir={dotnet_sdk.resolve()}", f"-p:Version={version}",
+            "dotnet", "publish", str(project), "-c", "Release", "-o", str(publish),
+            f"-p:HaivenSdkDotnetDir={sdk_dir}", f"-p:Version={version}",
             "-p:ContinuousIntegrationBuild=true", "-p:Deterministic=true",
-        ], check=True)
+        ], check=True, cwd=ROOT)
         dlls = {p.name: p for p in publish.glob("*.dll")}
         if "Haiven.Sdk.Core.dll" not in dlls:
             raise ReleaseError("dotnet publish produced no Haiven.Sdk.Core.dll")
