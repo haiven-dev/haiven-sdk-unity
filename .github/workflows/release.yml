@@ -7,6 +7,7 @@ name: Release
 # The tag must equal v<com.haiven.sdk/package.json version>, including a
 # prerelease such as v0.1.0-alpha.1. v0.0.0 is rejected. Bump the version on
 # main first, then tag that commit. ci/release.py fails the build otherwise.
+# A prerelease tag is published with --prerelease so it is not Latest.
 
 on:
   push:
@@ -108,6 +109,12 @@ jobs:
             gh release download "$TAG" -D "$existing"
             python3 haiven-sdk-unity/ci/release.py --out release/assets --compare-to "$existing"
           else
-            gh release create "$TAG" release/assets/* \
-              --verify-tag --title "$TAG" --notes-file release/notes.md
+            # Without --prerelease, gh records prerelease:false and an alpha
+            # published after a stable tag becomes the repository Latest.
+            create_args=(--verify-tag --title "$TAG" --notes-file release/notes.md)
+            prerelease_tag_re='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*$'
+            if [[ "$TAG" =~ $prerelease_tag_re ]]; then
+              create_args+=(--prerelease)
+            fi
+            gh release create "$TAG" release/assets/* "${create_args[@]}"
           fi
