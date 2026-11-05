@@ -50,9 +50,13 @@ for (const field of ["version", "displayName", "description", "unity"]) {
 	check(typeof manifest[field] === "string" && manifest[field] !== "", `package.json is missing ${field}`)
 }
 
-// A semver with no pre-release, because UPM sorts versions and a malformed one
-// is treated as older than everything.
-check(/^\d+\.\d+\.\d+$/.test(manifest.version), `version is not a plain semver: ${manifest.version}`)
+// SemVer, with an optional prerelease such as 0.1.0-alpha.1. UPM treats a
+// non-semver version as older than every real one. 0.0.0 stays valid in the
+// manifest; ci/release.py refuses to tag that development sentinel.
+check(
+	/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(manifest.version),
+	`version is not semver: ${manifest.version}`,
+)
 
 // The minimum editor version is declared as MAJOR.MINOR with no patch. Unity
 // rejects a three-part value here, which is easy to write and fails at import.
