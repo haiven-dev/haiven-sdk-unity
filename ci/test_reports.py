@@ -29,6 +29,8 @@ class ReportTests(unittest.TestCase):
 
     def test_editor_pin_is_unity_6_0(self):
         root = Path(__file__).resolve().parents[1]
+        self.assertEqual(runner.SDK, root)
+        self.assertEqual(runner.HOST, root / "host")
         self.assertEqual(runner.VERSION, "6000.0.52f1")
         manifest = json.loads((root / "com.haiven.sdk/package.json").read_text())
         self.assertEqual(manifest["unity"], "6000.0")

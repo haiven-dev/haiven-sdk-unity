@@ -1,26 +1,29 @@
 # Unity engine test host
 
-This host consumes `file:../../com.haiven.sdk` through UPM and the current
-C# core built from `csharp/Haiven.Sdk/*.cs`. The package currently contains only
-the bridge: preparation supplies `Haiven.Sdk.Core.dll` and its pinned
+This host consumes `file:../../com.haiven.sdk` through UPM. That path is
+relative to `host/Packages` and resolves to `com.haiven.sdk` at the root of
+this repository. Preparation publishes `Haiven.Sdk.Core.dll` from
+`core/Haiven.Sdk.Core.csproj`, which compiles `Haiven.Sdk/*.cs` in the sibling
+`haiven-sdk-dotnet` checkout (`HaivenSdkDotnetDir`). The package currently
+contains only the bridge: preparation supplies that DLL and its pinned
 System.Text.Json dependencies as host plugins. No replacement socket or fake
 Unity API is compiled into this host.
 
 ## Runner setup and activation
 
 Use an activated Linux **Unity 6000.0.52f1 (9e4086222921)** editor with the matching
-**WebGL Build Support** module, installed at
-`/opt/unity/6000.0.52f1/Editor/Unity`. The matching module includes Unity's
-IL2CPP/Emscripten toolchain. The engine checks both its version and module
-availability before the build. [Official editor and module downloads](https://unity.com/releases/editor/whats-new/6000.0.52f1).
+**WebGL Build Support** module. Point `UNITY_EDITOR` at that editor binary.
+The runner accepts only the version string `6000.0.52f1`. The matching module
+includes Unity's IL2CPP/Emscripten toolchain. The engine checks both its version
+and module availability before the build. [Official editor and module downloads](https://unity.com/releases/editor/whats-new/6000.0.52f1).
 
 Register an isolated self-hosted runner with labels `linux`, `x64`, and
 `unity-6000.0.52f1-webgl`. Activate the editor under the same OS account that runs
 the Actions agent using your organization's Unity entitlement; verify an editor
 launch succeeds under that account. Credentials belong in the runner's license
-service or passage, not this repository or command logs. Install Python 3,
-Node 24, .NET SDK 10.0.400 (see `global.json`), and Chromium's system dependencies (Playwright
-`install-deps chromium` during runner provisioning).
+service, not this repository or command logs. Install Python 3,
+Node 24, the .NET SDK pinned by `haiven-sdk-dotnet/global.json`, and Chromium's
+system dependencies (Playwright `install-deps chromium` during runner provisioning).
 
 No SDK runner or Unity activation secret was available when this harness was
 added. The workflow therefore has explicit dispatch/reusable triggers for its
@@ -31,13 +34,25 @@ triggers and require its status check. Do not count static checks as engine proo
 ## Run
 
 ```sh
-npm ci --prefix csharp/unity/ci
-(cd csharp/unity/ci && npx --no-install playwright install chromium)
-UNITY_EDITOR=/opt/unity/6000.0.52f1/Editor/Unity python3 csharp/unity/ci/run.py
+npm ci --prefix ci
+(cd ci && npx --no-install playwright install chromium)
+UNITY_EDITOR=/path/to/Unity python3 ci/run.py
 ```
 
-Run from the SDK root. Logs and NUnit XML remain in `build/unity-results/`.
-The workflow uploads them even on failure. Each editor test process gets 15
+Run from the repository root. `UNITY_EDITOR` is the 6000.0.52f1 editor binary.
+Logs and NUnit XML remain in `build/unity-results/`.
+Without that editor, the layout checks in this repository still run:
+
+```sh
+node validate-package.mjs
+python3 -m unittest ci.test_reports
+```
+
+`.github/workflows/build.yml` runs those two on pull requests and on `v*` tags.
+`.github/workflows/release.yml` builds the release assets when a `v*` tag is
+pushed. The tag must be `v` plus `com.haiven.sdk/package.json`'s version, and
+`0.0.0` is refused.
+An editor run uploads its logs even on failure. Each editor test process gets 15
 minutes, the build 30 minutes, and the browser three minutes; the job gets an
 hour. Missing editors, wrong versions, absent/empty/duplicate/skipped/failed
 expected cases, unsuccessful builds, or absent browser completion fail.
