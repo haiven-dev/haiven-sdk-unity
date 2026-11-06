@@ -1,5 +1,10 @@
 # Unity engine test host
 
+Haiven's source in this repository, including this host, is Apache-2.0. See
+[`LICENSE`](../LICENSE). This host does not vendor Unity source.
+`com.unity.test-framework` in `Packages/manifest.json` is a Package Manager
+dependency, not copied source.
+
 This host consumes `file:../../com.haiven.sdk` through UPM and the current
 C# core built from `csharp/Haiven.Sdk/*.cs`. The package currently contains only
 the bridge: preparation supplies `Haiven.Sdk.Core.dll` and its pinned

@@ -50,6 +50,17 @@ for (const field of ["version", "displayName", "description", "unity"]) {
 	check(typeof manifest[field] === "string" && manifest[field] !== "", `package.json is missing ${field}`)
 }
 
+// Haiven's package source is Apache-2.0. The identifier has to match the
+// LICENSE file that ships inside the package, because the UPM tarball does
+// not include the repository-root copy.
+check(manifest.license === "Apache-2.0", `package.json license must be Apache-2.0, found ${manifest.license}`)
+const licensePath = join(PACKAGE, "LICENSE")
+check(existsSync(licensePath), "package has no LICENSE")
+if (existsSync(licensePath)) {
+	const license = readFileSync(licensePath, "utf8")
+	check(license.includes("Apache License") && license.includes("Version 2.0, January 2004"), "package LICENSE is not Apache-2.0")
+}
+
 // SemVer, with an optional prerelease such as 0.1.0-alpha.1. UPM treats a
 // non-semver version as older than every real one. 0.0.0 stays valid in the
 // manifest; ci/release.py refuses to tag that development sentinel.

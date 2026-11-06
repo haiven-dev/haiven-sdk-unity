@@ -127,7 +127,7 @@ def generated_meta(rel, is_dir):
             "  - first:\n      Editor: Editor\n    second:\n      enabled: 0\n"
             "      settings:\n        DefaultValueInitialized: true\n"
             "  - first:\n      WebGL: WebGL\n    second:\n      enabled: 1\n      settings: {}\n") + tail
-    if suffix in {".md", ".xml", ".txt", ".json"}:
+    if suffix in {".md", ".xml", ".txt", ".json"} or Path(rel).name in {"LICENSE", "NOTICE"}:
         return head + "TextScriptImporter:\n  externalObjects: {}\n" + tail
     return head + "DefaultImporter:\n  externalObjects: {}\n" + tail
 
