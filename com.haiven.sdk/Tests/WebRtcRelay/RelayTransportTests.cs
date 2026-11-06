@@ -21,8 +21,10 @@ namespace Haiven.Sdk.WebRtc.RelayTests
     /// turn:192.168.1.10:3478. The queue test needs the server to cap a
     /// session's rate (coturn --max-bps=262144) so that the queue fills.
     ///
-    /// A separate assembly, so the strict engine harness, which selects
-    /// <c>Haiven.Sdk.Tests.*</c> and fails on any ignored test, leaves them out.
+    /// A separate assembly. This repository's <c>ci/run.py</c> selects six host
+    /// tests in the <c>Haiven.Tests</c> namespace and does not run package
+    /// tests. The upstream haiven-sdk harness selects <c>Haiven.Sdk.Tests.*</c>
+    /// and fails on an ignored test, so it leaves this assembly out.
     /// </summary>
     public sealed class RelayTransportTests
     {

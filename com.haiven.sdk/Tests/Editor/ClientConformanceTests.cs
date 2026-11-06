@@ -7,8 +7,11 @@ using NUnit.Framework;
 namespace Haiven.Sdk.Tests
 {
     /// <summary>
-    /// Runs the shared gaming-client/v0 scripted-server corpus inside Unity's
-    /// EditMode runner against the exact package source Unity compiles.
+    /// Upstream gaming-client/v0 corpus runner. This repository does not
+    /// contain that corpus. Its host manifest does not list the package in
+    /// <c>testables</c>, and <c>ci/run.py</c> does not set
+    /// <c>HAIVEN_CLIENT_SUITE</c>, so the host run does not execute this test.
+    /// A harness that supplies the corpus can still run it.
     /// </summary>
     public class ClientConformanceTests
     {
