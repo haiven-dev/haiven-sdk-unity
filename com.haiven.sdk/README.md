@@ -2,6 +2,17 @@
 
 `com.haiven.sdk` — the Haiven client SDK as a UPM package.
 
+## License
+
+Copyright 2026 Haiven. Haiven's source code in this package is licensed under
+the Apache License, Version 2.0 (SPDX `Apache-2.0`). The terms are in
+[`LICENSE`](LICENSE). The same text is at the repository root and covers the
+host, CI, and core project files in this repository.
+
+This package does not contain Unity Technologies source code. It is Haiven
+code that calls Unity APIs. Unity editor assemblies and `com.unity.*` package
+source are not redistributed here.
+
 ## Installing
 
 Add it by git URL in the Package Manager, or in `Packages/manifest.json`:

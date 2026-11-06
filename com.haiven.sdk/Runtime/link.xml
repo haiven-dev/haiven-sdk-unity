@@ -1,4 +1,7 @@
 <!--
+  Copyright 2026 Haiven
+  SPDX-License-Identifier: Apache-2.0
+
   IL2CPP strips what it cannot see being used, and it cannot see any of this.
 
   Two distinct reasons, which is why one blanket rule would be the wrong shape:
