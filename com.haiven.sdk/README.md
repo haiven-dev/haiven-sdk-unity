@@ -187,10 +187,9 @@ server-initiated event read as a *failed reply*. The built-in reader keeps
 
 ## P2P sessions
 
-`HaivenP2PSession` in the core creates and joins haiven-api's P2P sessions,
+`HaivenP2PSession` in `Runtime/Core` creates and joins haiven-api's P2P sessions,
 signals over the game socket, resumes after a dropped socket and checks the
-roster; the core is in [haiven-sdk-dotnet](https://github.com/haiven-dev/haiven-sdk-dotnet).
-The Unity package adds the data transport:
+roster. That source ships in this package. The Unity package adds the data transport:
 
 - **`UnityWebRtcPeerTransport`** (`Runtime/WebRtc`, assembly
   `Haiven.Sdk.WebRtc`) implements `IHaivenPeerTransport` on `com.unity.webrtc`
@@ -203,35 +202,58 @@ The Unity package adds the data transport:
   which needs Unity 6. The package itself does not depend on NGO; the imported
   sample is the game's own code.
 
-The transport's PlayMode tests run two real connections in one process. The
-direct cases (`Tests/WebRtc`, assembly `Haiven.Sdk.Tests.WebRtc`) run in the
-engine harness in `../ci/run.py`. The relay and send-queue cases
-(`Tests/WebRtcRelay`, assembly `Haiven.Sdk.WebRtc.RelayTests`) need a TURN
-server with a REST shared secret, `HAIVEN_TEST_TURN_URL` and
-`HAIVEN_TEST_TURN_SECRET`, and are ignored without them, so the harness, which
-fails on an ignored test, does not select that assembly.
+The transport's PlayMode tests run two real connections in one process. They
+are package tests. This repository's host does not run them. The direct cases
+are `Tests/WebRtc`, assembly `Haiven.Sdk.Tests.WebRtc`. The relay and
+send-queue cases (`Tests/WebRtcRelay`, assembly `Haiven.Sdk.WebRtc.RelayTests`)
+need a TURN server with a REST shared secret, `HAIVEN_TEST_TURN_URL` and
+`HAIVEN_TEST_TURN_SECRET`, and are ignored without them.
 
-## Remaining engine evidence
+## Checks in this repository
 
-The engine harness in `../host` runs package EditMode and PlayMode tests, builds
-a High-stripping IL2CPP WebGL player, and requires real browser round trips for
-the `.jslib`, handoff, and analytics paths. Static validation remains useful but
-is not a substitute for that harness. The EditMode suite reads the shared
-`gaming-client/v0` corpus and replays every unwaived scenario through the exact
-package source compiled by Unity.
+`ci/run.py` is the host runner. It requires an activated Unity `6000.0.52f1`
+editor, the version pinned in `host/ProjectSettings/ProjectVersion.txt`. It
+removes a stale `host/Assets/Plugins/Core` publish and the sibling
+`Core.meta`, starts the local socket fixture, and runs six host tests:
+
+- EditMode: `Haiven.Tests.ProtocolTests.LocalPackageLoads`,
+  `RefusedReplyPreservesPresence`, `EventHasNoSuccessOrRequestId`, and
+  `HandoffDispatcherRunsOnUnityThread`
+- PlayMode: `Haiven.Tests.SocketTests.SocketRoundTripAndReconnect` and
+  `Haiven.Tests.HandoffTests.DeepLinkStoresTokenAndCompletesOnUnityThread`
+
+It then builds the host WebGL player and requires a real browser round trip.
+`host/Packages/manifest.json` does not list this package under `testables`,
+so package EditMode and PlayMode tests are not part of that run. This
+repository has no `gaming-client/v0` conformance corpus, and `ci/run.py` does
+not set `HAIVEN_CLIENT_SUITE`.
+
+`node validate-package.mjs` and `python3 -m unittest discover -s ci` do not
+need an editor. GitHub Actions runs those, plus `dotnet build` of
+`core/Haiven.Sdk.Core.csproj`, from `.github/workflows/build.yml`. No runner
+for Unity `6000.0.52f1` is provisioned here, so `ci/run.py` is not a
+pull-request check.
+
+## Upstream evidence
+
+The runs below are from
+[haiven-sdk](https://github.com/haiven-dev/haiven-sdk). They are not runs of
+this repository, and they do not prove the host described above.
 
 The prior aggregate tip passed the combined zero-mandatory-DLL package under
 Unity 2022.3.62f2 in [run 38601804971](https://github.com/haiven-dev/haiven-sdk/actions/runs/38601804971),
-but that run predates the shared client-corpus test. Three release claims remain
-narrower than the current source evidence:
+but that run predates the shared client-corpus test. Three upstream claims
+remain narrower than that source tree:
 
-1. **The exact supported editor.** Release evidence for this aggregate must
-   come from a successful same-repository pull-request run on the pinned Unity
-   2022.3.62f2 runner; run 38601804971 proves only the older subset at its own
-   tip. The repository ruleset does not currently require this workflow.
-2. **`link.xml`.** Removal experiment done ([unity-editor.yml run 38113269264](https://github.com/haiven-dev/haiven-sdk/actions/runs/38113269264)):
+1. **The exact supported editor.** Upstream release evidence for that aggregate
+   has to come from a successful haiven-sdk pull-request run on the pinned
+   Unity 2022.3.62f2 runner. Run 38601804971 proves only the older subset at
+   its own tip. This repository's ruleset does not require that workflow.
+2. **`link.xml`.** Removal experiment done on haiven-sdk
+   ([unity-editor.yml run 38113269264](https://github.com/haiven-dev/haiven-sdk/actions/runs/38113269264)):
    the stripped WebGL smoke passes without it. The smoke did not exercise typed
    payload decoding; see the scope recorded in `Runtime/link.xml`.
 3. **The optional System.Text.Json codec under IL2CPP.** The built-in codec uses
-   no reflection and runs in the WebGL harness. The local System.Text.Json
-   staging path is compiled outside Unity but has not run in a player build.
+   no reflection. In the upstream harness it runs in the WebGL player. The
+   local System.Text.Json staging path is compiled outside Unity but has not
+   run in a player build. This repository's host run does not stage that codec.
