@@ -1,3 +1,6 @@
+// Copyright 2026 Haiven
+// SPDX-License-Identifier: Apache-2.0
+//
 // The WebGL transport: the browser's own WebSocket, reached from managed code.
 //
 // This file exists because Unity's supported targets do not agree that sockets
