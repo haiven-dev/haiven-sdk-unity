@@ -373,8 +373,10 @@ namespace Haiven.Sdk
 
         /// <summary>
         /// Creates a session and hosts it. When the reply is lost, calling it
-        /// again with the same options on the same socket repeats the same
-        /// admission, and the server answers as it did the first time (SDK-P2P-3).
+        /// again with the same options repeats that admission: the original
+        /// body and proof, including after the game socket is replaced
+        /// (ADR 0036 point 4). The controller then resumes that participation
+        /// on the new socket before it fetches ICE servers.
         /// </summary>
         public async Task<HaivenSessionAdmission> CreateAsync(HaivenSessionCreateOptions options, CancellationToken cancellationToken = default)
         {
@@ -382,9 +384,9 @@ namespace Haiven.Sdk
             var connectionId = BeginAdmission();
             try
             {
-                var attempt = Repeat("create", connectionId, CreateKey(options));
+                var attempt = Repeat("create", connectionId, CreateKey(options), options, null, null);
                 var admission = await Admit(attempt, () =>
-                    sessions.CreateAsync(connectionId, options, attempt.AdmissionId, attempt.ResumeToken, cancellationToken));
+                    sessions.CreateAsync(attempt.ConnectionId, attempt.Options!, attempt.AdmissionId, attempt.ResumeToken, cancellationToken));
                 try
                 {
                     var roster = await sessions.RosterAsync(admission.SessionId, cancellationToken);
@@ -406,17 +408,19 @@ namespace Haiven.Sdk
 
         /// <summary>
         /// Joins a listed session, or a private or mixed-age one with its code.
-        /// When the reply is lost, calling it again with the same arguments on
-        /// the same socket repeats the same admission (SDK-P2P-3).
+        /// When the reply is lost, calling it again with the same arguments
+        /// repeats that admission, including after the game socket is replaced
+        /// (ADR 0036 point 4). The controller then resumes that participation
+        /// on the new socket before it fetches ICE servers.
         /// </summary>
         public async Task<HaivenSessionAdmission> JoinAsync(string sessionId, string? joinCode = null, CancellationToken cancellationToken = default)
         {
             var connectionId = BeginAdmission();
             try
             {
-                var attempt = Repeat("join", connectionId, sessionId + "\n" + joinCode);
+                var attempt = Repeat("join", connectionId, sessionId + "\n" + joinCode, null, sessionId, joinCode);
                 var admission = await Admit(attempt, () =>
-                    sessions.JoinAsync(connectionId, sessionId, joinCode, attempt.AdmissionId, attempt.ResumeToken, cancellationToken));
+                    sessions.JoinAsync(attempt.ConnectionId, attempt.SessionId!, attempt.JoinCode, attempt.AdmissionId, attempt.ResumeToken, cancellationToken));
                 await EnterAsync(admission);
                 return admission;
             }
@@ -533,23 +537,33 @@ namespace Haiven.Sdk
         }
 
         // The admission the server may have taken without its reply arriving.
-        // Only the same call on the same socket repeats it: the server answers
-        // a different body under the same admissionId with 409.
-        private Admission Repeat(string kind, string connectionId, string arguments)
+        // The key is the operation and the body, not the socket that is open
+        // now. ADR 0036 point 4 replays that original body before it checks
+        // the old socket: a replacement connection must not mint a new
+        // admission id. A different body is a new admission. The server
+        // answers a different body under the same admission id with 409.
+        private Admission Repeat(
+            string kind, string connectionId, string arguments,
+            HaivenSessionCreateOptions? options, string? sessionId, string? joinCode)
         {
-            var key = kind + "\n" + connectionId + "\n" + arguments;
-            return unanswered != null && unanswered.Key == key
-                ? unanswered
-                : new Admission(key, HaivenSessionsClient.NewAdmissionId(), HaivenSessionsClient.NewResumeToken());
+            var key = kind + "\n" + arguments;
+            if (unanswered != null && unanswered.Key == key) return unanswered;
+            return new Admission(key, connectionId, HaivenSessionsClient.NewAdmissionId(), HaivenSessionsClient.NewResumeToken())
+            {
+                Options = options == null ? null : Snapshot(options),
+                SessionId = sessionId,
+                JoinCode = joinCode,
+            };
         }
 
         private async Task<HaivenSessionAdmission> Admit(Admission attempt, Func<Task<HaivenSessionAdmission>> send)
         {
             try
             {
-                var admission = await send();
-                unanswered = null;
-                return admission;
+                // Leave the proof in place until EnterAsync has the participation
+                // on the socket that is open now. A lost resume must retry this
+                // same body.
+                return await send();
             }
             catch (HaivenRestException)
             {
@@ -574,39 +588,73 @@ namespace Haiven.Sdk
                 options.RequireRelay, options.JoinPayload, metadata);
         }
 
+        // The request that was actually sent. A later call can mutate the
+        // options object the game still holds; the replay must not follow it.
+        private static HaivenSessionCreateOptions Snapshot(HaivenSessionCreateOptions options) =>
+            new HaivenSessionCreateOptions(options.MaxMembers)
+            {
+                Visibility = options.Visibility,
+                AllowMixedAges = options.AllowMixedAges,
+                RequireRelay = options.RequireRelay,
+                JoinPayload = options.JoinPayload,
+                Metadata = options.Metadata == null ? null : new Dictionary<string, string>(options.Metadata),
+            };
+
         private sealed class Admission
         {
-            public Admission(string key, string admissionId, string resumeToken)
+            public Admission(string key, string connectionId, string admissionId, string resumeToken)
             {
                 Key = key;
+                ConnectionId = connectionId;
                 AdmissionId = admissionId;
                 ResumeToken = resumeToken;
             }
 
             public string Key { get; }
 
+            /// <summary>The socket named in the original body. A retry sends this, not the socket open now.</summary>
+            public string ConnectionId { get; }
+
             public string AdmissionId { get; }
 
             public string ResumeToken { get; }
+
+            public HaivenSessionCreateOptions? Options { get; set; }
+
+            public string? SessionId { get; set; }
+
+            public string? JoinCode { get; set; }
         }
 
         private async Task EnterAsync(HaivenSessionAdmission admission)
         {
             room = admission;
+            var sameSocket = channel?.IsOpen == true && channel.ConnectionId == admission.ConnectionId;
+            // The server has answered. On this socket the participation is
+            // ours, so a later failure leaves it. Across a reconnect the proof
+            // stays until session.resume moves it here.
+            if (sameSocket) unanswered = null;
             try
             {
+                if (!sameSocket) await ResumeRecoveredAdmission(admission);
+                unanswered = null;
                 IceOptions = await FetchIceAsync(admission);
             }
             catch
             {
                 room = null;
-                try
+                var heldHere = channel?.IsOpen == true && channel.ConnectionId == admission.ConnectionId;
+                if (heldHere)
                 {
-                    await sessions.LeaveAsync(admission.SessionId);
-                }
-                catch (Exception error)
-                {
-                    Diagnostic?.Invoke("leave", error);
+                    unanswered = null;
+                    try
+                    {
+                        await sessions.LeaveAsync(admission.SessionId);
+                    }
+                    catch (Exception error)
+                    {
+                        Diagnostic?.Invoke("leave", error);
+                    }
                 }
                 throw;
             }
@@ -616,6 +664,32 @@ namespace Haiven.Sdk
             Signaling.Start(admission.Hosting);
             nextRoster = clock() + RosterIntervalSeconds;
             State = HaivenP2PState.InSession;
+        }
+
+        // The create or join that admitted us named the previous socket. Replay
+        // already returned its ids. Resume onto the socket that is open now
+        // before fetching ICE servers: haiven-api issues those for the
+        // participation's current socket.
+        private async Task ResumeRecoveredAdmission(HaivenSessionAdmission admission)
+        {
+            if (channel != null && channel.IsOpen && channel.ConnectionId == admission.ConnectionId) return;
+            if (channel == null || !channel.IsOpen)
+                throw new InvalidOperationException("haiven: the game socket has not authenticated");
+            var reply = await channel.RequestAsync(WsTypes.SessionResume, new Contracts.SessionResumeRequestV0
+            {
+                ParticipationId = admission.ParticipationId,
+                PreviousConnectionId = admission.ConnectionId,
+                ResumeToken = admission.ResumeToken,
+            }, RequestTimeout);
+            if (reply.Success != true)
+            {
+                // The server refused it. Replaying the same admission again
+                // cannot revive an ended participation.
+                unanswered = null;
+                throw new InvalidOperationException(reply.Error ?? "session.resume failed");
+            }
+            var moved = WsApi.DecodeSessionResumeReply(reply)?.ConnectionId;
+            admission.ConnectionId = !string.IsNullOrEmpty(moved) ? moved! : channel.ConnectionId ?? admission.ConnectionId;
         }
 
         // haiven-api issues the servers for the caller's participation on this
@@ -680,13 +754,32 @@ namespace Haiven.Sdk
 
         private void KeepResuming(double now)
         {
-            if (resumeInFlight || room == null) return;
-            if (lostAt != null && now - lostAt > ResumeWindowSeconds)
+            if (room == null) return;
+            // Checked before the in-flight return. A resume that started near
+            // the end of the window must not hold the peer channels open for
+            // the rest of the request timeout.
+            if (ResumeExpired(now))
             {
-                End(HaivenP2PEndReason.ResumeWindowElapsed, null);
+                ExpireResume();
                 return;
             }
+            if (resumeInFlight) return;
             if (channel != null && channel.IsOpen && channel.ConnectionId != room.ConnectionId) _ = ResumeAsync();
+        }
+
+        private bool ResumeExpired(double now) => lostAt != null && now - lostAt > ResumeWindowSeconds;
+
+        // The participation is over. Close the peer connections the controller
+        // knows about, then end, so a late resume reply cannot restore it.
+        private void ExpireResume()
+        {
+            var peers = Peers;
+            if (peers != null)
+            {
+                foreach (var userId in peers.ConnectedUsers().ToList())
+                    peers.DropUser(userId);
+            }
+            End(HaivenP2PEndReason.ResumeWindowElapsed, null);
         }
 
         private async Task ResumeAsync()
@@ -703,6 +796,12 @@ namespace Haiven.Sdk
                     ResumeToken = current.ResumeToken,
                 }, RequestTimeout);
                 if (room != current) return;
+                // A reply that arrives after the window does not restore it.
+                if (ResumeExpired(clock()))
+                {
+                    ExpireResume();
+                    return;
+                }
                 if (reply.Success != true)
                 {
                     // session_not_found covers every refusal: the window ended,
