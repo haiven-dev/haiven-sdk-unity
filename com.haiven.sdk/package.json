@@ -1,6 +1,6 @@
 {
   "name": "com.haiven.sdk",
-  "version": "0.0.0",
+  "version": "0.1.0-preview.1",
   "displayName": "Haiven SDK",
   "description": "Client SDK for Haiven WebSocket and game login handoff APIs in Unity, including WebGL.",
   "unity": "2022.3",
