@@ -10,7 +10,7 @@
     <HaivenSdkDotnetDir Condition="'$(HaivenSdkDotnetDir)' == ''">$(MSBuildThisFileDirectory)../../haiven-sdk-dotnet</HaivenSdkDotnetDir>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="$(HaivenSdkDotnetDir)/Haiven.Sdk/*.cs" />
+    <Compile Include="$(HaivenSdkDotnetDir)/Haiven.Sdk/**/*.cs" Exclude="$(HaivenSdkDotnetDir)/Haiven.Sdk/bin/**;$(HaivenSdkDotnetDir)/Haiven.Sdk/obj/**" />
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
   </ItemGroup>
 </Project>

@@ -1,3 +1,4 @@
+#nullable enable
 using System;
 using System.Text;
 using System.Threading;
@@ -68,7 +69,7 @@ namespace Haiven.Sdk
                 operation.completed += _ => completion.TrySetResult(true);
                 if (operation.isDone) completion.TrySetResult(true);
                 using (cancellationToken.Register(request.Abort))
-                    await completion.Task.ConfigureAwait(false);
+                    await completion.Task;
                 cancellationToken.ThrowIfCancellationRequested();
 
                 if (request.result != UnityWebRequest.Result.Success)

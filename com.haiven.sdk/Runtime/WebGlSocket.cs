@@ -1,4 +1,5 @@
 #if UNITY_WEBGL && !UNITY_EDITOR
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
