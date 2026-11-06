@@ -58,6 +58,9 @@ def main():
     # leftover publish from an older run so it cannot keep failing the host.
     stale_plugins = HOST / "Assets/Plugins/Core"
     if stale_plugins.exists(): shutil.rmtree(stale_plugins)
+    # Unity's folder metadata sits beside the folder. An older import can
+    # leave Core.meta after the directory itself is gone.
+    (HOST / "Assets/Plugins/Core.meta").unlink(missing_ok=True)
     with (results / "fixture.log").open("w") as fixture_log:
         fixture = subprocess.Popen(["node", str(HERE / "fixture.mjs")], env=env, stdout=fixture_log, stderr=subprocess.STDOUT)
         try:
