@@ -1,7 +1,8 @@
 # Contributing
 
 Contributions are welcome. This repository is public. Bug reports, fixes,
-and documentation improvements are all useful.
+and documentation improvements are all useful. Contributions are accepted
+under the repository license once it is recorded.
 
 The UPM package is `com.haiven.sdk` at the root of this repository.
 
