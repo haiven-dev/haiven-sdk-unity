@@ -1,3 +1,4 @@
 /build/
 /core/bin/
 /core/obj/
+__pycache__/

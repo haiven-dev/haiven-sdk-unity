@@ -19,6 +19,8 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
 import { dirname, join, relative, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 
+import { isValidPackageVersion } from "./ci/package-version.mjs"
+
 // URL.pathname on Windows is `/C:/...`. Joining that yields `\C:\...`, which
 // opens as `C:\C:\...`. fileURLToPath returns a path the filesystem accepts.
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -54,32 +56,150 @@ for (const field of ["version", "displayName", "description", "unity"]) {
 	check(typeof manifest[field] === "string" && manifest[field] !== "", `package.json is missing ${field}`)
 }
 
-// SemVer, with an optional prerelease such as 0.1.0-alpha.1. UPM treats a
-// non-semver version as older than every real one. 0.0.0 stays valid in the
-// manifest; ci/release.py refuses to tag that development sentinel.
-check(
-	/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(manifest.version),
-	`version is not semver: ${manifest.version}`,
-)
+// UPM sorts package versions according to SemVer, including prerelease versions.
+// Reject malformed identifiers instead of silently sorting them unpredictably.
+check(isValidPackageVersion(manifest.version), `version is not valid semver: ${manifest.version}`)
 
 // The minimum editor version is declared as MAJOR.MINOR with no patch. Unity
 // rejects a three-part value here, which is easy to write and fails at import.
 check(/^\d{4}\.\d+$/.test(manifest.unity), `unity must be MAJOR.MINOR: ${manifest.unity}`)
 
+// The package compiles on its own: the core as source in its own assembly, the
+// Unity bridge over it, the WebRTC transport, an editor-only assembly, and test
+// assemblies that only exist when a project lists the package in `testables`.
+// The NGO sample is not compiled until a game imports it from Samples~.
+const EXPECTED_ASMDEFS = {
+	"Runtime/Haiven.Sdk.asmdef": "runtime",
+	"Runtime/Core/Haiven.Sdk.Core.asmdef": "core",
+	"Runtime/WebRtc/Haiven.Sdk.WebRtc.asmdef": "webrtc",
+	"Samples~/Netcode/Haiven.Sdk.Samples.Netcode.asmdef": "sample",
+	"Tests/WebRtc/Haiven.Sdk.Tests.WebRtc.asmdef": "test",
+	"Tests/WebRtcRelay/Haiven.Sdk.WebRtc.RelayTests.asmdef": "test",
+	"Runtime/SystemTextJson/Haiven.Sdk.SystemTextJson.Unity.asmdef": "optional-json",
+	"Editor/Haiven.Sdk.Editor.asmdef": "editor",
+	"Tests/Editor/Haiven.Sdk.Tests.Editor.asmdef": "test",
+	"Tests/Runtime/Haiven.Sdk.Tests.Runtime.asmdef": "test",
+}
 const asmdefs = files.filter((f) => f.endsWith(".asmdef"))
-check(asmdefs.length === 1, `expected exactly one asmdef, found ${asmdefs.length}`)
-
+check(
+	JSON.stringify([...asmdefs].sort()) === JSON.stringify(Object.keys(EXPECTED_ASMDEFS).sort()),
+	`asmdefs are ${asmdefs.join(", ")}; expected ${Object.keys(EXPECTED_ASMDEFS).join(", ")}`,
+)
 for (const path of asmdefs) {
 	const asmdef = JSON.parse(readFileSync(join(PACKAGE, path), "utf8"))
 	const stem = path.split("/").pop().replace(/\.asmdef$/, "")
-
 	// Unity keys the assembly by the `name` field and the file name has to
 	// match it. When they differ the assembly builds under one name and is
 	// referenced under the other, so every reference to it silently resolves to
 	// nothing.
 	check(asmdef.name === stem, `asmdef name ${asmdef.name} does not match its file ${stem}`)
-	check(path.startsWith("Runtime/"), `asmdef is outside Runtime/: ${path}`)
+
+	// The hand-published DLL this package used to expect. Referencing it again
+	// would bring back the manual install step.
+	check(
+		!(asmdef.precompiledReferences ?? []).includes("Haiven.Sdk.Core.dll"),
+		`${path} references Haiven.Sdk.Core.dll; the core ships as source in Runtime/Core`,
+	)
+
+	const kind = EXPECTED_ASMDEFS[path]
+	if (kind === "core") {
+		check(asmdef.noEngineReferences === true, `${path} must stay engine-free (noEngineReferences)`)
+	}
+	if (kind === "runtime" || kind === "editor" || kind === "optional-json" || kind === "webrtc" || kind === "sample") {
+		check((asmdef.references ?? []).includes("Haiven.Sdk.Core"), `${path} must reference Haiven.Sdk.Core`)
+	}
+	if (kind === "optional-json") {
+		check(
+			(asmdef.defineConstraints ?? []).includes("HAIVEN_SDK_SYSTEM_TEXT_JSON"),
+			`${path} must remain an explicit System.Text.Json opt-in`,
+		)
+		check(
+			JSON.stringify(asmdef.precompiledReferences ?? []) === JSON.stringify(["System.Text.Json.dll"]),
+			`${path} must reference only the explicitly staged System.Text.Json assembly`,
+		)
+	}
+	// com.unity.webrtc has no WebGL runtime. The transport, its tests and the
+	// sample over it stay out of a WebGL build, which keeps the WebSocket SDK.
+	if (kind === "webrtc" || kind === "sample" || path.startsWith("Tests/WebRtc")) {
+		check((asmdef.excludePlatforms ?? []).includes("WebGL"), `${path} must exclude WebGL`)
+	}
+	if (kind === "webrtc") {
+		check((asmdef.references ?? []).includes("Unity.WebRTC"), `${path} must reference Unity.WebRTC`)
+	}
+	if (kind === "sample") {
+		check((asmdef.references ?? []).includes("Unity.Netcode.Runtime"), `${path} must reference Unity.Netcode.Runtime`)
+	}
+	if (kind === "editor") {
+		check(
+			JSON.stringify(asmdef.includePlatforms) === JSON.stringify(["Editor"]),
+			`${path} must be editor-only`,
+		)
+	}
+	if (kind === "test") {
+		// Without the constraint a test assembly compiles into every consumer's
+		// project; with it, only into projects that list the package in testables.
+		check((asmdef.defineConstraints ?? []).includes("UNITY_INCLUDE_TESTS"), `${path} lacks UNITY_INCLUDE_TESTS`)
+		check(asmdef.autoReferenced === false, `${path} must not be auto-referenced`)
+	}
 }
+
+// Installing the SDK installs the WebRTC library its transport is built on. NGO
+// stays out: only the sample needs it, and a game imports the sample on request.
+check(manifest.dependencies?.["com.unity.webrtc"] === "3.0.0", "package.json must depend on com.unity.webrtc 3.0.0")
+check(
+	!Object.keys(manifest.dependencies ?? {}).some((name) => name.startsWith("com.unity.netcode")),
+	"package.json must not depend on Netcode; the NGO adapter is a sample",
+)
+for (const sample of manifest.samples ?? []) {
+	check(
+		typeof sample.path === "string" && sample.path.startsWith("Samples~/") && existsSync(join(PACKAGE, sample.path)),
+		`sample path does not exist under Samples~: ${sample.path}`,
+	)
+	check(typeof sample.displayName === "string" && sample.displayName !== "", `sample ${sample.path} has no displayName`)
+}
+
+// A git-URL package is immutable, and Unity ignores any asset in an immutable
+// folder that has no .meta. scripts/vendor-unity.py writes them; this checks
+// none went missing and none is orphaned, independently of that script.
+const isAsset = (path) => !path.split("/").some((part) => part.startsWith(".") || part.endsWith("~"))
+const assets = new Set()
+for (const path of files.filter((f) => !f.endsWith(".meta") && isAsset(f))) {
+	const parts = path.split("/")
+	for (let i = 1; i <= parts.length; i++) assets.add(parts.slice(0, i).join("/"))
+}
+for (const asset of assets) {
+	check(files.includes(`${asset}.meta`), `no .meta for ${asset}; run \`make vendor-unity\``)
+}
+for (const meta of files.filter((f) => f.endsWith(".meta"))) {
+	check(assets.has(meta.replace(/\.meta$/, "")), `orphaned ${meta}`)
+}
+const guids = files
+	.filter((f) => f.endsWith(".meta"))
+	.map((f) => /^guid: ([0-9a-f]{32})$/m.exec(readFileSync(join(PACKAGE, f), "utf8"))?.[1])
+check(!guids.includes(undefined), "a .meta has no 32-hex guid")
+check(new Set(guids).size === guids.length, "two .meta files share a guid")
+
+// The release package defaults to BuiltInJsonCodec and carries no managed
+// binaries. The source-checkout-only System.Text.Json staging command must not
+// leak its local output into a committed git-URL package.
+const dlls = files.filter((f) => f.endsWith(".dll"))
+check(dlls.length === 0, `the default package must not bundle managed DLLs: ${dlls.join(", ")}`)
+check(
+	!files.includes("Runtime/SystemTextJson/THIRD_PARTY_NOTICES.md"),
+	"optional binary notices exist without an opt-in binary closure",
+)
+
+// documentationUrl has pointed at a moved README before. It must name this
+// package's README on main, and the editor's Help menu must open the same page.
+const REPOSITORY = "https://github.com/haiven-dev/haiven-sdk-unity/blob/main/"
+check(
+	manifest.documentationUrl === `${REPOSITORY}com.haiven.sdk/README.md`,
+	`documentationUrl is not this package's README: ${manifest.documentationUrl}`,
+)
+check(
+	readFileSync(join(PACKAGE, "Editor/HaivenSdkMenu.cs"), "utf8").includes(`"${manifest.documentationUrl}"`),
+	"Editor/HaivenSdkMenu.cs DocumentationUrl differs from package.json documentationUrl",
+)
 
 // A `.jslib` is compiled into the WebGL build only when Unity recognises it as a
 // WebGL plugin. Inside a package that recognition comes from the path — a
@@ -96,6 +216,11 @@ for (const path of files.filter((f) => f.endsWith(".jslib"))) {
 // be exactly one — two are not merged in any documented order.
 const links = files.filter((f) => f.endsWith("link.xml"))
 check(links.length === 1, `expected exactly one link.xml, found ${links.length}`)
+if (links.length === 1) {
+	const link = readFileSync(join(PACKAGE, links[0]), "utf8")
+	check(link.includes('assembly fullname="Haiven.Sdk"'), "link.xml must preserve the WebGL callback assembly")
+	check(!link.includes('assembly fullname="Haiven.Sdk.Core"'), "link.xml must not preserve reflection-free core")
+}
 
 check(existsSync(join(PACKAGE, "README.md")), "package has no README.md")
 
@@ -108,7 +233,12 @@ check(existsSync(join(PACKAGE, "README.md")), "package has no README.md")
 // before parsing. That checks the surrounding code and deliberately does not
 // check the macro, which only emscripten can resolve.
 for (const path of files.filter((f) => f.endsWith(".jslib"))) {
-	const source = readFileSync(join(PACKAGE, path), "utf8").replace(/\{\{\{[^}]*\}\}\}/g, "(function(){})")
+	const rawSource = readFileSync(join(PACKAGE, path), "utf8")
+	check(
+		!/\)\s*\n\s*\{\{\{/.test(rawSource),
+		`${path} has a call immediately before an emscripten macro without a semicolon`,
+	)
+	const source = rawSource.replace(/\{\{\{[^}]*\}\}\}/g, "(function(){})")
 
 	try {
 		new Function("mergeInto", "LibraryManager", source)
@@ -122,5 +252,5 @@ if (problems.length > 0) {
 	process.exit(1)
 }
 
-console.error(`com.haiven.sdk: ${files.length} file(s), layout valid`)
-console.error("NOT a substitute for opening the package in Unity — see com.haiven.sdk/README.md")
+console.error(`com.haiven.sdk: ${files.length} file(s), ${asmdefs.length} asmdefs, ${dlls.length} DLLs, layout valid`)
+console.error("NOT a substitute for opening the package in Unity — see host/README.md")
