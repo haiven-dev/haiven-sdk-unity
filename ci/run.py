@@ -52,12 +52,12 @@ def main():
         with (results / (name + ".log")).open("w") as log:
             subprocess.run(command, cwd=SDK, env=env, stdout=log, stderr=subprocess.STDOUT, check=True, timeout=timeout)
 
-    plugins = HOST / "Assets/Plugins/Core"
-    if plugins.exists(): shutil.rmtree(plugins)
-    run("core", ["dotnet", "publish", str(HERE.parent / "core/Haiven.Sdk.Core.csproj"), "-c", "Release", "-o", str(plugins)])
-    # Unity supplies the platform assemblies; only ship the core and NuGet deps.
-    for file in plugins.iterdir():
-        if file.suffix != ".dll": file.unlink()
+    # The UPM package compiles Haiven.Sdk.Core from source. Publishing
+    # Haiven.Sdk.Core.dll or its NuGet neighbors into Assets/Plugins duplicates
+    # that assembly name, and Unity refuses to compile the project. Drop a
+    # leftover publish from an older run so it cannot keep failing the host.
+    stale_plugins = HOST / "Assets/Plugins/Core"
+    if stale_plugins.exists(): shutil.rmtree(stale_plugins)
     with (results / "fixture.log").open("w") as fixture_log:
         fixture = subprocess.Popen(["node", str(HERE / "fixture.mjs")], env=env, stdout=fixture_log, stderr=subprocess.STDOUT)
         try:
