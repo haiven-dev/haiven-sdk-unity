@@ -16,9 +16,12 @@
 //   node csharp/unity/validate-package.mjs
 
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
-import { join } from "node:path"
+import { dirname, join, relative, sep } from "node:path"
+import { fileURLToPath } from "node:url"
 
-const HERE = new URL(".", import.meta.url).pathname
+// URL.pathname on Windows is `/C:/...`. Joining that yields `\C:\...`, which
+// opens as `C:\C:\...`. fileURLToPath returns a path the filesystem accepts.
+const HERE = dirname(fileURLToPath(import.meta.url))
 const PACKAGE = join(HERE, "com.haiven.sdk")
 
 const problems = []
@@ -31,7 +34,8 @@ function walk(dir, found = []) {
 	for (const entry of readdirSync(dir)) {
 		const path = join(dir, entry)
 		if (statSync(path).isDirectory()) walk(path, found)
-		else found.push(path.slice(PACKAGE.length + 1))
+		// Checks below split on `/`. Windows join uses `\`, so normalize here.
+		else found.push(relative(PACKAGE, path).split(sep).join("/"))
 	}
 
 	return found
