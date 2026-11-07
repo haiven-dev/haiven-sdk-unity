@@ -1,0 +1,66 @@
+name: Build
+
+# Layout and report checks that do not need a Unity editor. A v* tag also runs
+# .github/workflows/release.yml, which builds the release assets. This file
+# never publishes.
+on:
+  pull_request:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: haiven-sdk-unity
+          persist-credentials: false
+
+      # The output field is `pin`, not `ref`. CodeQL's
+      # actions/cache-poisoning/poisonable-step query treats `steps.*.outputs.ref`
+      # as a pull-request head checkout. This workflow includes workflow_dispatch,
+      # which can write the default-branch cache, so that name fails the check.
+      # The value is the 40-hex SHA in ci/haiven-sdk-dotnet.ref.
+      - name: Read the haiven-sdk-dotnet pin
+        id: pin
+        run: |
+          pin="$(tr -d '[:space:]' < haiven-sdk-unity/ci/haiven-sdk-dotnet.ref)"
+          if ! [[ "$pin" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::ci/haiven-sdk-dotnet.ref must hold a full commit SHA"
+            exit 1
+          fi
+          echo "pin=$pin" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: haiven-dev/haiven-sdk-dotnet
+          ref: ${{ steps.pin.outputs.pin }}
+          path: haiven-sdk-dotnet
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: haiven-sdk-dotnet/global.json
+
+      - name: Validate the package layout
+        run: node haiven-sdk-unity/validate-package.mjs
+
+      - name: Report and editor-pin tests
+        working-directory: haiven-sdk-unity
+        run: python3 -m unittest discover -s ci -p 'test_*.py' -v
+
+      - name: Build the core assembly
+        run: >
+          dotnet build haiven-sdk-unity/core/Haiven.Sdk.Core.csproj
+          -c Release
+          -p:HaivenSdkDotnetDir="$GITHUB_WORKSPACE/haiven-sdk-dotnet"

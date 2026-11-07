@@ -10,8 +10,10 @@ import urllib.request
 import xml.etree.ElementTree as ET
 
 HERE = Path(__file__).resolve().parent
-SDK = HERE.parents[2]
-HOST = HERE.parent / "host"
+# This file lives in ci/ at the repository root. parents[2] was the monorepo
+# root when the script lived at csharp/unity/ci/run.py.
+SDK = HERE.parent
+HOST = SDK / "host"
 VERSION = "6000.0.52f1"
 EXPECTED = {
     "EditMode": {"Haiven.Tests.ProtocolTests.LocalPackageLoads", "Haiven.Tests.ProtocolTests.RefusedReplyPreservesPresence", "Haiven.Tests.ProtocolTests.EventHasNoSuccessOrRequestId", "Haiven.Tests.ProtocolTests.HandoffDispatcherRunsOnUnityThread"},

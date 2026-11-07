@@ -9,7 +9,7 @@ Add it by git URL in the Package Manager, or in `Packages/manifest.json`:
 ```json
 {
   "dependencies": {
-    "com.haiven.sdk": "https://github.com/haiven-dev/sdk-spike.git?path=csharp/unity/com.haiven.sdk"
+    "com.haiven.sdk": "https://github.com/haiven-dev/haiven-sdk-unity.git?path=com.haiven.sdk"
   }
 }
 ```
