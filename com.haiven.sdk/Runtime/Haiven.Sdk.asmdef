@@ -1,7 +1,9 @@
 {
   "name": "Haiven.Sdk",
   "rootNamespace": "Haiven.Sdk",
-  "references": [],
+  "references": [
+    "Haiven.Sdk.Core"
+  ],
   "includePlatforms": [],
   "excludePlatforms": [],
   "allowUnsafeCode": false,

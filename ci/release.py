@@ -7,13 +7,16 @@ Produces, in --out:
   com.haiven.sdk-<version>.unitypackage   the same package, rooted at Packages/com.haiven.sdk/
   Haiven.Sdk.Core.dll / .pdb              the engine-free C# core, netstandard2.1
   haiven-sdk-core-<version>-netstandard2.1.zip
-                                          the core plus the System.Text.Json closure it
-                                          needs, i.e. what a project drops into Assets/Plugins
+                                          the core plus the System.Text.Json closure.
+                                          A project that uses the UPM package must
+                                          not import these files.
   SHA256SUMS                              sha256sum-format digests of every file above
 
-The Unity bridge assembly (Haiven.Sdk, Runtime/Haiven.Sdk.asmdef) is NOT built
-here: it references UnityEngine, and Unity's managed assemblies are not
-redistributable. It ships as source inside the package and Unity compiles it.
+The UPM package compiles Haiven.Sdk and Haiven.Sdk.Core from source. Haiven.Sdk
+references UnityEngine, and Unity's managed assemblies are not redistributable,
+so that assembly is not built here. Do not import Haiven.Sdk.Core.dll beside
+the package: Unity rejects a precompiled assembly and an asmdef that share a
+name.
 
 Every archive is reproducible: entries are sorted, owners are 0, modes are
 fixed, and timestamps come from SOURCE_DATE_EPOCH or the HEAD commit time.
@@ -222,8 +225,11 @@ def write_zip(path, files, mtime):
 # --- the engine-free core ---------------------------------------------------
 
 def build_core(out, version, dotnet_sdk, mtime, tag):
-    if not (dotnet_sdk / "Haiven.Sdk").is_dir():
-        raise ReleaseError(f"{dotnet_sdk}/Haiven.Sdk not found; check out haiven-dev/haiven-sdk-dotnet there")
+    # The C# source is com.haiven.sdk/Runtime/Core. This checkout only pins the
+    # .NET SDK (global.json); it must not supply a different core.
+    if not (dotnet_sdk / "global.json").is_file():
+        raise ReleaseError(
+            f"{dotnet_sdk}/global.json not found; pass the haiven-sdk-dotnet checkout that pins the .NET SDK")
     # dotnet discovers global.json by walking upward from its process working
     # directory, not from the csproj. The release workflow runs this script
     # from the workspace parent and does not set working-directory: --out and
@@ -249,7 +255,7 @@ def build_core(out, version, dotnet_sdk, mtime, tag):
         if pinned:
             assert_pinned_sdk(pin_version)
             print(f"note: pinning dotnet publish to SDK {pin_version}", file=sys.stderr)
-        return _publish_core(out, version, dotnet_sdk, mtime)
+        return _publish_core(out, version, mtime)
     finally:
         if remove_pin:
             pin_target.unlink(missing_ok=True)
@@ -274,16 +280,15 @@ def assert_pinned_sdk(pin_version):
     raise ReleaseError(f"dotnet in {ROOT} selected SDK {chosen}, not pin {pin_version}")
 
 
-def _publish_core(out, version, dotnet_sdk, mtime):
+def _publish_core(out, version, mtime):
     with tempfile.TemporaryDirectory(dir=out.parent) as scratch:
-        # Absolute paths: cwd is ROOT, while the workflow's --out and
-        # --dotnet-sdk are relative to the workspace parent.
+        # Absolute paths: cwd is ROOT, while the workflow's --out is relative
+        # to the workspace parent.
         publish = (Path(scratch) / "publish").resolve()
         project = CORE_PROJECT.resolve()
-        sdk_dir = dotnet_sdk.resolve()
         subprocess.run([
             "dotnet", "publish", str(project), "-c", "Release", "-o", str(publish),
-            f"-p:HaivenSdkDotnetDir={sdk_dir}", f"-p:Version={version}",
+            f"-p:Version={version}",
             "-p:ContinuousIntegrationBuild=true", "-p:Deterministic=true",
         ], check=True, cwd=ROOT)
         dlls = {p.name: p for p in publish.glob("*.dll")}
@@ -291,8 +296,8 @@ def _publish_core(out, version, dotnet_sdk, mtime):
             raise ReleaseError("dotnet publish produced no Haiven.Sdk.Core.dll")
         for name in ["Haiven.Sdk.Core.dll", "Haiven.Sdk.Core.pdb"]:
             shutil.copyfile(publish / name, out / name)
-        # Same set ci/run.py installs into the host's Assets/Plugins/Core:
-        # every managed DLL, nothing else. Unity supplies the platform itself.
+        # Managed DLLs only. The host compiles Haiven.Sdk.Core from the UPM
+        # package and must not receive these files under Assets/Plugins.
         write_zip(out / f"haiven-sdk-core-{version}-netstandard2.1.zip", dlls, mtime)
         return sorted(dlls)
 
@@ -370,7 +375,7 @@ def main():
     parser.add_argument("--tag", default="",
                         help="release tag; must equal v<package.json version>, and must not be v0.0.0")
     parser.add_argument("--dotnet-sdk", type=Path, default=ROOT.parent / "haiven-sdk-dotnet",
-                        help="haiven-sdk-dotnet checkout providing Haiven.Sdk/*.cs")
+                        help="haiven-sdk-dotnet checkout whose global.json pins the .NET SDK")
     parser.add_argument("--notes", type=Path, help="also write release notes here (outside --out)")
     parser.add_argument("--compare-to", type=Path,
                         help="compare this existing asset directory to --out and exit without building or deleting")
@@ -398,18 +403,20 @@ def main():
     sha256sums(out)
 
     if args.notes:
-        dotnet_rev = subprocess.run(["git", "-C", str(dotnet_sdk), "rev-parse", "HEAD"],
-                                    capture_output=True, text=True).stdout.strip() or "unknown"
         # Same LF rule as SHA256SUMS: write_text would use CRLF on Windows.
         args.notes.write_bytes((
             f"com.haiven.sdk {version}\n\n"
             f"- UPM tarball: `{NAME}-{version}.tgz` (install with `file:` path or a tarball URL)\n"
             f"- Unity package: `{NAME}-{version}.unitypackage` (imports as an embedded package under `Packages/{NAME}/`)\n"
+            f"- The UPM package compiles `Haiven.Sdk` and `Haiven.Sdk.Core` from source. "
+            f"A project that uses the UPM package must not also import `Haiven.Sdk.Core.dll` "
+            f"or `haiven-sdk-core-{version}-netstandard2.1.zip`: Unity rejects a precompiled "
+            f"assembly and an assembly definition that share the name `Haiven.Sdk.Core`.\n"
             f"- Engine-free core: `Haiven.Sdk.Core.dll` (netstandard2.1), built from "
-            f"haiven-dev/haiven-sdk-dotnet@{dotnet_rev}\n"
+            f"`com.haiven.sdk/Runtime/Core` in this repository, the same source the UPM package compiles. "
+            f"Not for a project that uses the UPM package.\n"
             f"- `haiven-sdk-core-{version}-netstandard2.1.zip`: the core plus its managed dependencies "
-            f"({', '.join(core_dlls)}); place under `Assets/Plugins/` - the UPM package does not bundle them\n"
-            f"- The Unity bridge assembly (`Haiven.Sdk`) ships as source in the package; Unity compiles it.\n\n"
+            f"({', '.join(core_dlls)}). Do not place this zip under `Assets/Plugins/` when the UPM package is installed.\n\n"
             f"Verify downloads with `sha256sum -c SHA256SUMS`.\n").encode())
 
     for path in sorted(out.iterdir()):

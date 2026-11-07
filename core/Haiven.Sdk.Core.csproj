@@ -5,12 +5,12 @@
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
-    <!-- The haiven-dev/haiven-sdk-dotnet checkout that owns the core sources.
-         Defaults to a sibling of this repository; ci/release.py overrides it. -->
-    <HaivenSdkDotnetDir Condition="'$(HaivenSdkDotnetDir)' == ''">$(MSBuildThisFileDirectory)../../haiven-sdk-dotnet</HaivenSdkDotnetDir>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="$(HaivenSdkDotnetDir)/Haiven.Sdk/*.cs" />
+    <!-- The package ships this tree. Compiling it here makes the release DLL
+         the same core the UPM package compiles, instead of an older
+         haiven-sdk-dotnet pin. -->
+    <Compile Include="$(MSBuildThisFileDirectory)../com.haiven.sdk/Runtime/Core/**/*.cs" />
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
   </ItemGroup>
 </Project>
