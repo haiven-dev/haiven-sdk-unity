@@ -26,20 +26,25 @@ jobs:
           path: haiven-sdk-unity
           persist-credentials: false
 
+      # The output field is `pin`, not `ref`. CodeQL's
+      # actions/cache-poisoning/poisonable-step query treats `steps.*.outputs.ref`
+      # as a pull-request head checkout. This workflow includes workflow_dispatch,
+      # which can write the default-branch cache, so that name fails the check.
+      # The value is the 40-hex SHA in ci/haiven-sdk-dotnet.ref.
       - name: Read the haiven-sdk-dotnet pin
         id: pin
         run: |
-          ref="$(tr -d '[:space:]' < haiven-sdk-unity/ci/haiven-sdk-dotnet.ref)"
-          if ! [[ "$ref" =~ ^[0-9a-f]{40}$ ]]; then
+          pin="$(tr -d '[:space:]' < haiven-sdk-unity/ci/haiven-sdk-dotnet.ref)"
+          if ! [[ "$pin" =~ ^[0-9a-f]{40}$ ]]; then
             echo "::error::ci/haiven-sdk-dotnet.ref must hold a full commit SHA"
             exit 1
           fi
-          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "pin=$pin" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: haiven-dev/haiven-sdk-dotnet
-          ref: ${{ steps.pin.outputs.ref }}
+          ref: ${{ steps.pin.outputs.pin }}
           path: haiven-sdk-dotnet
           persist-credentials: false
 
