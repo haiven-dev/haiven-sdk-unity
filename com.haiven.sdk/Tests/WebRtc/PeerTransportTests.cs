@@ -86,5 +86,16 @@ namespace Haiven.Sdk.WebRtc.Tests
             links.Add(pair.Guest);
             return pair;
         }
+
+        [UnityTest]
+        public IEnumerator HostRefusesGuestWithAnotherFingerprint()
+        {
+            var pair = Pair(Direct(), Direct());
+            pair.TamperOffer = sdp => Regex.Replace(sdp, @"(a=fingerprint:sha-256 )([0-9A-F]{2})",
+                match => match.Groups[1].Value + (match.Groups[2].Value == "00" ? "01" : "00"));
+            yield return pair.Connect();
+            Assert.That(pair.Host.IsOpen || pair.Guest.IsOpen, Is.False, "a channel opened to an unadmitted guest");
+            Assert.That(pair.HostClosed, Is.Not.Null, "the host did not report the failed handshake");
+        }
     }
 }

@@ -119,7 +119,7 @@ namespace Haiven.Sdk
         /// <summary>Raised for each local candidate, to be sent through signaling.</summary>
         event Action<PeerIceCandidate>? LocalCandidate;
 
-        /// <summary>Raised once per channel when it opens.</summary>
+        /// <summary>Raised once per channel, only after DTLS verified the certificate against the applied remote SDP fingerprint.</summary>
         event Action<PeerChannel>? ChannelOpened;
 
         /// <summary>Raised for each message received.</summary>

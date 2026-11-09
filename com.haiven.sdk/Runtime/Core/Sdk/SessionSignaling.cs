@@ -97,6 +97,17 @@ namespace Haiven.Sdk
 
         public event Action<string, PeerSignal>? Received;
 
+        /// <summary>The first accepted frame of a guest attempt, before all SDP fragments arrive.</summary>
+        internal event Action<string>? AttemptStarted;
+
+        /// <summary>Discards a failed or removed peer's fragments and retries, retaining its epoch watermark.</summary>
+        internal void ForgetPeer(string userId)
+        {
+            incoming.Remove(userId);
+            outgoing.Remove(userId);
+            unacknowledged.RemoveAll(message => message.ToUserId == userId);
+        }
+
         /// <summary>Never raised: the session resumes a closed socket or ends.</summary>
         public event Action<string>? HostUnreachable { add { } remove { } }
 
@@ -167,13 +178,13 @@ namespace Haiven.Sdk
             channel.Pump();
             if (socketClosed) return;
             var now = clock();
-            for (var i = unacknowledged.Count - 1; i >= 0; i--)
+            foreach (var message in new List<Unacknowledged>(unacknowledged))
             {
-                var message = unacknowledged[i];
+                if (!unacknowledged.Contains(message)) continue;
                 if (now < message.NextTry) continue;
                 if (message.Retries >= RetryDelays.Length)
                 {
-                    unacknowledged.RemoveAt(i);
+                    unacknowledged.Remove(message);
                     Abandoned?.Invoke(message.ToUserId, message.Seq);
                     continue;
                 }
@@ -225,6 +236,7 @@ namespace Haiven.Sdk
 
             foreach (var data in fragments)
             {
+                if (!outgoing.TryGetValue(toUserId, out var current) || current != attempt) break;
                 var sent = new Unacknowledged(toUserId, attempt.AttemptId, ++attempt.LastSeq, data)
                 {
                     NextTry = clock() + RetryDelays[0],
@@ -350,9 +362,26 @@ namespace Haiven.Sdk
                 }
                 attempt = new Incoming(attemptId, first.ParticipationId, first.Epoch);
                 incoming[from] = attempt;
+                if (!ours) AttemptStarted?.Invoke(from);
+                if (!incoming.TryGetValue(from, out var current) || current != attempt) return;
             }
 
             if (seq < attempt.NextSeq || attempt.Held.ContainsKey(seq)) return;
+            var envelope = TryRead(received.Data);
+            if (envelope == null || envelope.ParticipationId != attempt.ParticipationId || envelope.Epoch != attempt.Epoch) return;
+            if (envelope.Candidate != null && !attempt.DescriptionComplete && ++attempt.Candidates > HaivenPeerConnections.MaxPendingCandidates)
+            {
+                ForgetPeer(from);
+                Refused?.Invoke(from, "candidate_buffer_full");
+                return;
+            }
+            // A missing sequence must not permit an unbounded candidate queue.
+            if (attempt.Held.Count >= HaivenPeerConnections.MaxPendingCandidates + MaxFragments)
+            {
+                ForgetPeer(from);
+                Refused?.Invoke(from, "candidate_buffer_full");
+                return;
+            }
             attempt.Held[seq] = received.Data;
             while (attempt.Held.TryGetValue(attempt.NextSeq, out var next))
             {
@@ -360,7 +389,14 @@ namespace Haiven.Sdk
                 attempt.NextSeq++;
                 var piece = TryRead(next);
                 var signal = piece == null ? null : attempt.Take(piece);
+                if (attempt.DescriptionTooLarge)
+                {
+                    ForgetPeer(from);
+                    Refused?.Invoke(from, "sdp_too_large");
+                    break;
+                }
                 if (signal != null) Received?.Invoke(from, signal);
+                if (!incoming.TryGetValue(from, out var current) || current != attempt) break;
             }
         }
 
@@ -510,6 +546,7 @@ namespace Haiven.Sdk
             private readonly Dictionary<int, string> parts = new Dictionary<int, string>();
             private string? assembling;
             private int expected;
+            private int descriptionBytes;
 
             public Incoming(string attemptId, string participationId, int epoch)
             {
@@ -528,6 +565,10 @@ namespace Haiven.Sdk
 
             public Dictionary<int, string> Held { get; } = new Dictionary<int, string>();
 
+            public int Candidates { get; set; }
+            public bool DescriptionComplete { get; private set; }
+            public bool DescriptionTooLarge { get; private set; }
+
             /// <summary>
             /// The signal a message completes: a candidate at once, a description
             /// once all its parts are in, assembled by <c>part</c>. Null while parts are missing.
@@ -540,6 +581,14 @@ namespace Haiven.Sdk
                     parts.Clear();
                     assembling = piece.Description;
                     expected = piece.Parts;
+                    descriptionBytes = 0;
+                }
+                if (parts.TryGetValue(piece.Part, out var old)) descriptionBytes -= System.Text.Encoding.UTF8.GetByteCount(old);
+                descriptionBytes += System.Text.Encoding.UTF8.GetByteCount(piece.Sdp);
+                if (descriptionBytes > MaxDescriptionBytes)
+                {
+                    DescriptionTooLarge = true;
+                    return null;
                 }
                 parts[piece.Part] = piece.Sdp;
                 if (parts.Count < expected) return null;
@@ -547,6 +596,7 @@ namespace Haiven.Sdk
                 for (var part = 1; part <= expected; part++) sdp.Append(parts[part]);
                 parts.Clear();
                 assembling = null;
+                DescriptionComplete = true;
                 return piece.Description == "offer" ? PeerSignal.Offer(sdp.ToString()) : PeerSignal.Answer(sdp.ToString());
             }
         }

@@ -107,6 +107,8 @@ namespace Haiven.Sdk.WebRtc.Tests
 
             public Func<string, string> TamperAnswer { get; set; } = sdp => sdp;
 
+            public Func<string, string> TamperOffer { get; set; } = sdp => sdp;
+
             public List<Received> HostReceived { get; } = new List<Received>();
 
             public List<Received> GuestReceived { get; } = new List<Received>();
@@ -136,7 +138,7 @@ namespace Haiven.Sdk.WebRtc.Tests
             private async Task Exchange()
             {
                 var offer = await Guest.Transport.CreateOfferAsync();
-                var answer = await Host.Transport.AcceptOfferAsync(offer);
+                var answer = await Host.Transport.AcceptOfferAsync(TamperOffer(offer));
                 hostHasRemote = true;
                 Flush(Host, toHost);
                 await Guest.Transport.AcceptAnswerAsync(TamperAnswer(answer));

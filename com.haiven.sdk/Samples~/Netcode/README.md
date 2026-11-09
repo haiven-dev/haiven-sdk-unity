@@ -6,6 +6,7 @@ socket. Needs Unity 6 and `com.unity.netcode.gameobjects` 2.4. Not for WebGL.
 
 - `HaivenNetworkTransport` is the NGO `NetworkTransport`. NGO client ids map
   to Haiven user ids; read one with `GetUserId(clientId)`.
+- Peer attempts run in the SDK core's `HaivenPeerConnections`. The sample keeps NGO ids, delivery mapping and framing; offer/answer exchange, the 64-candidate cap and the 20-second timeout are shared with other .NET hosts.
 - `HaivenNetcodeSession` sits next to the `NetworkManager`, creates or joins a
   session through `HaivenP2PSession`, sets the transport up and starts NGO.
 

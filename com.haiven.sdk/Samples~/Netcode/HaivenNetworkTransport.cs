@@ -36,12 +36,22 @@ namespace Haiven.Sdk.Samples.Netcode
         private float nextRoundTrip;
         private bool isServer;
         private bool started;
+        private HaivenPeerConnections? connections;
 
         public IHaivenPeerSignaling? Signaling { get; set; }
 
         /// <summary>ICE servers and policy for every connection this transport creates.</summary>
-        public PeerConnectionOptions Connection { get; set; } =
-            new PeerConnectionOptions(Array.Empty<PeerIceServer>(), PeerIcePolicy.All);
+        private PeerConnectionOptions connection = new PeerConnectionOptions(Array.Empty<PeerIceServer>(), PeerIcePolicy.All);
+
+        public PeerConnectionOptions Connection
+        {
+            get => connection;
+            set
+            {
+                connection = value;
+                if (connections != null) connections.Connection = value;
+            }
+        }
 
         /// <summary>The host's user id. Guests only.</summary>
         public string? HostUserId { get; set; }
@@ -61,10 +71,7 @@ namespace Haiven.Sdk.Samples.Netcode
         /// <summary>The users whose data channels are open, for the host's roster check.</summary>
         public IEnumerable<string> ConnectedUsers()
         {
-            var users = new List<string>();
-            foreach (var peer in peersByClient.Values)
-                if (peer.Connected && !peer.Lost) users.Add(peer.UserId);
-            return users;
+            return connections?.ConnectedUsers() ?? Array.Empty<string>();
         }
 
         /// <summary>
@@ -103,8 +110,6 @@ namespace Haiven.Sdk.Samples.Netcode
                 Shutdown();
                 return false;
             }
-            var peer = AddPeer(HostUserId!, HostClientId);
-            _ = Offer(peer);
             return true;
         }
 
@@ -145,7 +150,7 @@ namespace Haiven.Sdk.Samples.Netcode
 
         public override NetworkEvent PollEvent(out ulong clientId, out ArraySegment<byte> payload, out float receiveTime)
         {
-            if (events.Count == 0 && started && Signaling is IHaivenPeerSignalingLifecycle lifecycle) lifecycle.Poll();
+            if (events.Count == 0 && started) connections?.Tick();
             if (started && Time.realtimeSinceStartup >= nextRoundTrip)
             {
                 nextRoundTrip = Time.realtimeSinceStartup + RoundTripInterval;
@@ -202,16 +207,12 @@ namespace Haiven.Sdk.Samples.Netcode
 
         public override void Shutdown()
         {
-            if (Signaling != null) Signaling.Received -= OnSignal;
-            if (started && Signaling is IHaivenPeerSignalingLifecycle lifecycle)
-            {
-                lifecycle.HostUnreachable -= OnHostUnreachable;
-                lifecycle.Stop();
-            }
+            started = false;
             foreach (var peer in new List<Peer>(peersByClient.Values)) Lose(peer, raiseEvent: false, sayGoodbye: true);
+            connections?.Dispose();
+            connections = null;
             events.Clear();
             nextClientId = 1;
-            started = false;
         }
 
         private bool Begin(bool asServer)
@@ -222,147 +223,38 @@ namespace Haiven.Sdk.Samples.Netcode
                 Debug.LogError("[haiven-p2p] Signaling is not set");
                 return false;
             }
-            if (Signaling is IHaivenPeerSignalingLifecycle lifecycle)
-            {
-                if (!lifecycle.Start(asServer)) return false;
-                lifecycle.HostUnreachable += OnHostUnreachable;
-            }
             isServer = asServer;
+            connections = new HaivenPeerConnections(Signaling, CreateTransport, () => Time.realtimeSinceStartupAsDouble)
+            {
+                Connection = Connection,
+            };
+            connections.Started += AddPeer;
+            connections.Connected += userId =>
+            {
+                if (!peersByUser.TryGetValue(userId, out var peer)) return;
+                peer.Connected = true;
+                PeerConnected?.Invoke(userId);
+                Enqueue(NetworkEvent.Connect, peer.ClientId, default);
+            };
+            connections.Disconnected += (userId, reason) =>
+            {
+                Debug.Log($"[haiven-p2p] connection to {userId} closed: {reason}");
+                if (peersByUser.TryGetValue(userId, out var peer)) Lose(peer, raiseEvent: true);
+                else if (!isServer) Enqueue(NetworkEvent.Disconnect, HostClientId, default);
+            };
             started = true;
-            Signaling.Received += OnSignal;
-            return true;
+            if (connections.Start(asServer, HostUserId)) return true;
+            Shutdown();
+            return false;
         }
 
-        // Before the data channels open, a guest without signaling cannot
-        // connect at all, so NGO hears of it and stops waiting. Once they are
-        // open the game goes on without signaling.
-        private void OnHostUnreachable(string reason)
+        private void AddPeer(string userId, HaivenPeerLink link)
         {
-            if (isServer || !peersByClient.TryGetValue(HostClientId, out var host) || host.Connected) return;
-            Debug.LogWarning($"[haiven-p2p] {reason}");
-            Lose(host, raiseEvent: true);
-        }
-
-        private void OnSignal(string fromUserId, PeerSignal signal)
-        {
-            if (!started) return;
-
-            if (signal.Kind == PeerSignalKind.Offer)
-            {
-                if (!isServer) return;
-                // A guest that offers again has started over; its old
-                // connection is gone.
-                if (peersByUser.TryGetValue(fromUserId, out var old)) Lose(old, raiseEvent: true);
-                _ = Answer(AddPeer(fromUserId, nextClientId++), signal.Sdp!);
-                return;
-            }
-
-            if (!peersByUser.TryGetValue(fromUserId, out var peer)) return;
-            if (signal.Kind == PeerSignalKind.Answer)
-            {
-                if (!isServer) _ = ApplyAnswer(peer, signal.Sdp!);
-            }
-            else if (peer.RemoteApplied) peer.Link.Transport.AddRemoteCandidate(signal.Candidate!);
-            else peer.PendingCandidates.Add(signal.Candidate!);
-        }
-
-        private Peer AddPeer(string userId, ulong clientId)
-        {
-            var peer = new Peer(userId, clientId, new HaivenPeerLink(CreateTransport(Connection)));
+            var clientId = isServer ? nextClientId++ : HostClientId;
+            var peer = new Peer(userId, clientId, link);
             peersByClient[clientId] = peer;
             peersByUser[userId] = peer;
-
-            // libwebrtc starts gathering inside SetLocalDescription, so the first
-            // candidates appear before the offer or answer is sent. The host
-            // drops a candidate from a guest it has no offer from, so they wait.
-            peer.Link.Transport.LocalCandidate += candidate =>
-            {
-                if (peer.LocalSent) Signaling?.Send(userId, PeerSignal.ForCandidate(candidate));
-                else peer.OutgoingCandidates.Add(candidate);
-            };
-            peer.Link.Opened += () =>
-            {
-                if (peer.Lost) return;
-                peer.Connected = true;
-                PeerConnected?.Invoke(peer.UserId);
-                Enqueue(NetworkEvent.Connect, clientId, default);
-            };
-            peer.Link.Message += (message, reliable) => OnMessage(peer, message, reliable);
-            peer.Link.Closed += reason =>
-            {
-                if (peer.Lost) return;
-                Debug.Log($"[haiven-p2p] connection to {userId} closed: {reason}");
-                Lose(peer, raiseEvent: true);
-            };
-            return peer;
-        }
-
-        private async Task Offer(Peer peer)
-        {
-            try
-            {
-                var offer = await peer.Link.Transport.CreateOfferAsync();
-                if (peer.Lost) return;
-                Signaling?.Send(peer.UserId, PeerSignal.Offer(offer));
-                LocalSent(peer);
-            }
-            catch (Exception error)
-            {
-                Fail(peer, "offer", error);
-            }
-        }
-
-        private async Task Answer(Peer peer, string offerSdp)
-        {
-            try
-            {
-                var answer = await peer.Link.Transport.AcceptOfferAsync(offerSdp);
-                if (peer.Lost) return;
-                RemoteApplied(peer);
-                Signaling?.Send(peer.UserId, PeerSignal.Answer(answer));
-                LocalSent(peer);
-            }
-            catch (Exception error)
-            {
-                Fail(peer, "answer", error);
-            }
-        }
-
-        private async Task ApplyAnswer(Peer peer, string answerSdp)
-        {
-            try
-            {
-                await peer.Link.Transport.AcceptAnswerAsync(answerSdp);
-                if (!peer.Lost) RemoteApplied(peer);
-            }
-            catch (Exception error)
-            {
-                Fail(peer, "apply answer", error);
-            }
-        }
-
-        // Candidates can arrive before the description they belong to is applied;
-        // they wait until it is (SDK-P2P-8).
-        private static void RemoteApplied(Peer peer)
-        {
-            peer.RemoteApplied = true;
-            foreach (var candidate in peer.PendingCandidates) peer.Link.Transport.AddRemoteCandidate(candidate);
-            peer.PendingCandidates.Clear();
-        }
-
-        private void LocalSent(Peer peer)
-        {
-            peer.LocalSent = true;
-            foreach (var candidate in peer.OutgoingCandidates)
-                Signaling?.Send(peer.UserId, PeerSignal.ForCandidate(candidate));
-            peer.OutgoingCandidates.Clear();
-        }
-
-        private void Fail(Peer peer, string step, Exception error)
-        {
-            if (peer.Lost) return;
-            Debug.LogWarning($"[haiven-p2p] {step} with {peer.UserId} failed: {error.Message}");
-            Lose(peer, raiseEvent: true);
+            link.Message += (message, reliable) => OnMessage(peer, message, reliable);
         }
 
         private void OnMessage(Peer peer, byte[] message, bool reliable)
@@ -377,7 +269,8 @@ namespace Haiven.Sdk.Samples.Netcode
                 }
                 catch (InvalidOperationException error)
                 {
-                    Fail(peer, "read reliable stream", error);
+                    Debug.LogWarning($"[haiven-p2p] invalid reliable stream: {error.Message}");
+                    Lose(peer, raiseEvent: true);
                     return;
                 }
                 foreach (var payload in complete) Enqueue(NetworkEvent.Data, peer.ClientId, new ArraySegment<byte>(payload));
@@ -419,6 +312,7 @@ namespace Haiven.Sdk.Samples.Netcode
         {
             if (peer.Lost) return;
             peer.Lost = true;
+            connections?.Detach(peer.UserId);
             peersByClient.Remove(peer.ClientId);
             if (peersByUser.TryGetValue(peer.UserId, out var current) && current == peer) peersByUser.Remove(peer.UserId);
             if (sayGoodbye && peer.Connected)
@@ -480,14 +374,6 @@ namespace Haiven.Sdk.Samples.Netcode
             public HaivenPeerLink Link { get; }
 
             public ReliableAssembler Assembler { get; } = new ReliableAssembler();
-
-            public List<PeerIceCandidate> PendingCandidates { get; } = new List<PeerIceCandidate>();
-
-            public List<PeerIceCandidate> OutgoingCandidates { get; } = new List<PeerIceCandidate>();
-
-            public bool RemoteApplied { get; set; }
-
-            public bool LocalSent { get; set; }
 
             public string? LoggedPath { get; set; }
 
