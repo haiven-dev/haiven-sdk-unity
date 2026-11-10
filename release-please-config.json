@@ -1,0 +1,18 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "simple",
+  "include-v-in-tag": true,
+  "include-component-in-tag": false,
+  "bump-minor-pre-major": true,
+  "bump-patch-for-minor-pre-major": true,
+  "bootstrap-sha": "e1b1be3a63db9c591471ca82ae94885a071d4499",
+  "draft": false,
+  "prerelease": false,
+  "packages": {
+    ".": {
+      "package-name": "haiven-sdk-unity",
+      "initial-version": "0.0.1",
+      "changelog-path": "CHANGELOG.md"
+    }
+  }
+}
