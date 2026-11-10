@@ -83,17 +83,50 @@ package is moderated chat, a live reward claim, and inventory fed by Haiven
 item entitlements. Boss Room's own license stays in that repository's
 `LICENSE.md`.
 
-The demo reads public project settings from the environment of the Editor
-process, then from a generated settings asset, then from a `.env` file in
-the project root (the folder that contains `Assets`). A `.env` file is the
-reliable way to configure a project opened from Unity Hub, because Hub does
-not inherit a shell you export later. Do not commit `.env`. Do not put an
-access token, an integration key, or `HAIVEN_DEMO_ACCESS_TOKEN` in it. The
-player signs in at runtime, and the token stays in memory.
+The demo reads each public setting from the Editor process environment,
+then from the committed asset
+`Assets/HaivenGenerated/Resources/Haiven/BossRoomDemoSettings.json`
+(`schemaVersion` 1), then from a `.env` file in the project root (the
+folder that contains `Assets`). A non-empty field in that asset is used
+before `.env`. The Boss Room clone has no `Haiven/HaivenDemoConfiguration`
+resource, so that file is not a source. Unity Hub does not pass variables
+from a shell you export later, and it does not load `.env`. A stock Hub
+open uses the asset. The sandbox `.env` below does not configure that open
+by itself.
+
+The committed asset is a local stack, not the sandbox:
+
+- `baseUrl` is `http://127.0.0.1:18480/v0`
+- `realtimeUrl` is `ws://127.0.0.1:18480/v0/ws`
+- `signInUrl` is `http://127.0.0.1:3000/connect/game`
+- `redirectUri` is `http://127.0.0.1:47615/haiven/callback`
+
+`appId`, `integrationId`, `communityId`, `channelId`, and `rewardRef` are
+filled too. Play talks to those loopback hosts. Those required fields are
+present, so the HUD does not show `CONFIG REQUIRED` and does not name the
+variables in `.env`.
+
+To make that `.env` apply, either:
+
+- Put the variables in the Editor process environment before the Editor
+  starts, and start the Editor from that process. Hub will not see an
+  export made after it launched the Editor. A process value overrides the
+  asset.
+- Or keep opening the project from Hub, and clear the asset fields `.env`
+  should fill. Set these strings to `""`, and leave `schemaVersion` at 1
+  and `redirectUri` unchanged: `baseUrl`, `realtimeUrl`, `appId`,
+  `integrationId`, `communityId`, `channelId`, `rewardRef`, and
+  `signInUrl`. Save the file and let the Editor import it, then press Play.
+  Empty fields then come from `.env`. Do not commit that edit.
+
+Do not commit `.env`. Do not put an access token, an integration key, or
+`HAIVEN_DEMO_ACCESS_TOKEN` in `.env` or in the asset. The player signs in
+at runtime, and the token stays in memory.
 
 Ask the Haiven app owner for the ids. Sandbox hosts are below. The
-integration must allow the redirect exactly, including the port. The default
-is `http://127.0.0.1:47615/haiven/callback`. Use `127.0.0.1`, not
+integration must allow the redirect exactly, including the port. The
+default, already stored in `redirectUri`, is
+`http://127.0.0.1:47615/haiven/callback`. Use `127.0.0.1`, not
 `localhost`.
 
 ```dotenv
@@ -105,13 +138,19 @@ HAIVEN_DEMO_CHANNEL_ID=<channel id>
 HAIVEN_DEMO_REWARD_REF=<reward ref>
 ```
 
-`HAIVEN_DEMO_SIGN_IN_URL` is optional when the sign-in page shares the API
-host. For the sandbox that is `https://sbx.haiven.gg/connect/game`.
-`HAIVEN_DEMO_COMMUNITY_ID` is optional and is the chat channel's community.
+`HAIVEN_DEMO_SIGN_IN_URL` is optional when `signInUrl` in the asset is
+empty and the sign-in page shares the API host. For the sandbox that is
+`https://sbx.haiven.gg/connect/game`. The shipped `signInUrl` blocks that
+default, so the browser opens `http://127.0.0.1:3000/connect/game` until
+the field is cleared or the Editor process sets the variable.
+`HAIVEN_DEMO_COMMUNITY_ID` is optional and is the chat channel's
+community. The shipped `communityId` is used until that field is empty or
+the Editor process sets the variable.
 
 Add the clone in Unity Hub, open it with **6000.0.52f1**, open
-`Assets/Scenes/Startup.unity`, and press Play. If a required variable is
-missing, the HUD shows `CONFIG REQUIRED` and names it.
+`Assets/Scenes/Startup.unity`, and press Play. If a required value is
+still missing after the asset and `.env`, the HUD shows `CONFIG REQUIRED`
+and names it.
 
 ## Add the package to your own project
 
