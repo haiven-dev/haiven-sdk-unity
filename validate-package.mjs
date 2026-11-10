@@ -13,7 +13,7 @@
 // So this validates what is checkable and stays quiet about what is not. It is
 // not a substitute for opening the package in Unity, and the README says so.
 //
-//   node csharp/unity/validate-package.mjs
+//   node validate-package.mjs
 
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
 import { dirname, join, relative, sep } from "node:path"
@@ -123,4 +123,4 @@ if (problems.length > 0) {
 }
 
 console.error(`com.haiven.sdk: ${files.length} file(s), layout valid`)
-console.error("NOT a substitute for opening the package in Unity — see csharp/unity/README.md")
+console.error("NOT a substitute for opening the package in Unity — see com.haiven.sdk/README.md")
