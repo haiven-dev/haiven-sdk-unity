@@ -63,6 +63,10 @@ jobs:
             echo "sdk-dev moved: expected $EXPECTED_SDK_DEV_SHA, found $sdk_dev_sha" >&2
             exit 1
           fi
+          if ! git merge-base --is-ancestor origin/main origin/sdk-dev; then
+            echo "main is not contained in sdk-dev; reconcile sdk-dev before promoting" >&2
+            exit 1
+          fi
 
           commit_count="$(git rev-list --count origin/main..origin/sdk-dev)"
           if [[ "$commit_count" == 0 ]]; then
@@ -71,6 +75,9 @@ jobs:
           fi
 
           promotion_branch="promote/sdk-dev-${sdk_dev_sha}"
+          # %s drops BREAKING CHANGE and Release-As. Raw %B can exceed the
+          # 60000-byte pull request body guard. Keep the subject and those lines.
+          promotion_shas="$(git rev-list --reverse origin/main..origin/sdk-dev)"
           {
             echo "Promotes the exact reviewed sdk-dev head into main."
             echo
@@ -84,9 +91,20 @@ jobs:
             echo "the tag and GitHub release."
             echo
             echo "BEGIN_COMMIT_OVERRIDE"
-            git log --reverse \
-              --format='BEGIN_NESTED_COMMIT%n%s%nEND_NESTED_COMMIT' \
-              origin/main..origin/sdk-dev
+            while IFS= read -r sha; do
+              if [[ -z "$sha" ]]; then
+                continue
+              fi
+              echo "BEGIN_NESTED_COMMIT"
+              git log -1 --format='%s' "$sha"
+              body="$(git log -1 --format='%b' "$sha")"
+              footers="$(printf '%s\n' "$body" | grep -E '^(BREAKING CHANGE:|BREAKING-CHANGE:|Release-As:)' || true)"
+              if [[ -n "$footers" ]]; then
+                echo
+                printf '%s\n' "$footers"
+              fi
+              echo "END_NESTED_COMMIT"
+            done <<< "$promotion_shas"
             echo "END_COMMIT_OVERRIDE"
             echo
             echo "After the release PR merges, reset sdk-dev to main with a force-with-lease"
@@ -154,6 +172,22 @@ jobs:
               -f title='chore: promote sdk-dev to main' \
               -F body=@"$RUNNER_TEMP/sdk-dev-promotion.md" \
               --jq .number)"
+          fi
+
+          # Close older promote/sdk-dev-* pull requests. Merging a stale head
+          # republishes commits the new override also lists.
+          stale_numbers="$(gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/pulls?state=open&base=main&per_page=100" \
+            --jq '.[] | select(.head.ref | test("^promote/sdk-dev-[0-9a-f]{40}$")) | select(.head.ref != env.PROMOTION_BRANCH) | .number')"
+          if [[ -n "$stale_numbers" ]]; then
+            while IFS= read -r stale_number; do
+              if [[ -z "$stale_number" ]]; then
+                continue
+              fi
+              gh pr close "$stale_number" \
+                --repo "$GITHUB_REPOSITORY" \
+                --comment "Superseded by ${PROMOTION_BRANCH}."
+            done <<< "$stale_numbers"
           fi
 
           echo "number=$pr_number" >> "$GITHUB_OUTPUT"

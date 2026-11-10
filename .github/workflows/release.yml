@@ -4,6 +4,11 @@ name: Release
 # A manual dispatch builds the same assets and keeps them as a workflow
 # artifact only; it never publishes.
 #
+# When the tag already has a GitHub release and that release has no uploaded
+# assets, the publish job uploads the built files and leaves the existing
+# notes in place. Assets that are already present are never replaced; a byte
+# mismatch fails the job.
+#
 # The tag must equal v<com.haiven.sdk/package.json version>, including a
 # prerelease such as v0.1.0-alpha.1. v0.0.0 is rejected. Bump the version on
 # main first, then tag that commit. ci/release.py fails the build otherwise.
@@ -103,11 +108,29 @@ jobs:
         run: |
           (cd release/assets && sha256sum -c SHA256SUMS)
           if gh release view "$TAG" > /dev/null 2>&1; then
-            # Do not --clobber. That deletes each asset before the replacement
-            # upload, and a moved tag would change bytes under an existing version.
-            existing="$(mktemp -d)"
-            gh release download "$TAG" -D "$existing"
-            python3 haiven-sdk-unity/ci/release.py --out release/assets --compare-to "$existing"
+            asset_count="$(gh release view "$TAG" --json assets --jq '(.assets // []) | length')"
+            if [[ ! "$asset_count" =~ ^[0-9]+$ ]]; then
+              echo "could not read release asset count for ${TAG}" >&2
+              exit 1
+            fi
+            if [[ "$asset_count" == 0 ]]; then
+              # release-please publishes notes and the tag, with no build
+              # artifacts. Attach this build and leave those notes in place.
+              shopt -s nullglob
+              assets=(release/assets/*)
+              shopt -u nullglob
+              if [[ "${#assets[@]}" -eq 0 ]]; then
+                echo "no built release assets to upload" >&2
+                exit 1
+              fi
+              gh release upload "$TAG" "${assets[@]}"
+            else
+              # Do not --clobber. That deletes each asset before the replacement
+              # upload, and a moved tag would change bytes under an existing version.
+              existing="$(mktemp -d)"
+              gh release download "$TAG" -D "$existing"
+              python3 haiven-sdk-unity/ci/release.py --out release/assets --compare-to "$existing"
+            fi
           else
             # Without --prerelease, gh records prerelease:false and an alpha
             # published after a stable tag becomes the repository Latest.
