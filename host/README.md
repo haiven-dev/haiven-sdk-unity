@@ -21,7 +21,7 @@ Register an isolated self-hosted runner with labels `linux`, `x64`, and
 `unity-6000.0.52f1-webgl`. Activate the editor under the same OS account that runs
 the Actions agent using your organization's Unity entitlement; verify an editor
 launch succeeds under that account. Credentials belong in the runner's license
-service, not this repository or command logs. Install Python 3,
+service or the local secret store, not this repository or command logs. Install Python 3,
 Node 24, the .NET SDK pinned by `haiven-sdk-dotnet/global.json`, and Chromium's
 system dependencies (Playwright `install-deps chromium` during runner provisioning).
 

@@ -165,8 +165,7 @@ repository:
   handoff types). That core, and the `System.Text.Json` assemblies it needs,
   ship as `haiven-sdk-core-<version>-netstandard2.1.zip` on the same release.
   Extract it into `Assets/Plugins`. The package folder does not contain
-  those DLLs. `com.haiven.sdk/README.md` still shows an old `sdk-spike` git
-  URL. Do not use that URL.
+  those DLLs.
 
 When a release exists, its tag is `v` plus the `version` in
 `com.haiven.sdk/package.json` (for example `v0.1.0`, not `v0.0.0`). In
