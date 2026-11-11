@@ -33,7 +33,7 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(runner.HOST, root / "host")
         self.assertEqual(runner.VERSION, "6000.0.52f1")
         manifest = json.loads((root / "com.haiven.sdk/package.json").read_text())
-        self.assertEqual(manifest["unity"], "6000.0")
+        self.assertEqual(manifest["unity"], "2022.3")
         version = (root / "host/ProjectSettings/ProjectVersion.txt").read_text()
         self.assertEqual(
             version,

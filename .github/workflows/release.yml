@@ -26,8 +26,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      # The core project compiles ../../haiven-sdk-dotnet/Haiven.Sdk/*.cs, so the
-      # two repositories are checked out side by side.
+      # haiven-sdk-dotnet is checked out for its global.json SDK pin. The core
+      # assembly compiles com.haiven.sdk/Runtime/Core from this repository.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: haiven-sdk-unity

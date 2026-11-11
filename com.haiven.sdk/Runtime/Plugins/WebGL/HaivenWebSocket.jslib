@@ -49,8 +49,8 @@ mergeInto(LibraryManager.library, {
 
 			var size = lengthBytesUTF8(event.data) + 1
 			var buffer = _malloc(size)
-			stringToUTF8(event.data, buffer, size)
-			{{{ makeDynCall('vii', 'onMessage') }}}(handle, buffer)
+			stringToUTF8(event.data, buffer, size);
+			{{{ makeDynCall('vii', 'onMessage') }}}(handle, buffer);
 			_free(buffer)
 		}
 
@@ -58,8 +58,8 @@ mergeInto(LibraryManager.library, {
 			var reason = event.reason || ""
 			var size = lengthBytesUTF8(reason) + 1
 			var buffer = _malloc(size)
-			stringToUTF8(reason, buffer, size)
-			{{{ makeDynCall('viii', 'onClosed') }}}(handle, event.code, buffer)
+			stringToUTF8(reason, buffer, size);
+			{{{ makeDynCall('viii', 'onClosed') }}}(handle, event.code, buffer);
 			_free(buffer)
 			delete haivenState.sockets[handle]
 		}

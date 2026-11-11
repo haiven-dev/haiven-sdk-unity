@@ -59,8 +59,9 @@ jobs:
         working-directory: haiven-sdk-unity
         run: python3 -m unittest discover -s ci -p 'test_*.py' -v
 
+      # The checkout above pins the .NET SDK. The assembly compiles
+      # com.haiven.sdk/Runtime/Core, the source the package ships.
       - name: Build the core assembly
         run: >
           dotnet build haiven-sdk-unity/core/Haiven.Sdk.Core.csproj
           -c Release
-          -p:HaivenSdkDotnetDir="$GITHUB_WORKSPACE/haiven-sdk-dotnet"

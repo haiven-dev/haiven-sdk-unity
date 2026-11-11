@@ -2,12 +2,12 @@
 
 This host consumes `file:../../com.haiven.sdk` through UPM. That path is
 relative to `host/Packages` and resolves to `com.haiven.sdk` at the root of
-this repository. Preparation publishes `Haiven.Sdk.Core.dll` from
-`core/Haiven.Sdk.Core.csproj`, which compiles `Haiven.Sdk/*.cs` in the sibling
-`haiven-sdk-dotnet` checkout (`HaivenSdkDotnetDir`). The package currently
-contains only the bridge: preparation supplies that DLL and its pinned
-System.Text.Json dependencies as host plugins. No replacement socket or fake
-Unity API is compiled into this host.
+this repository. The package compiles both the Unity bridge (`Haiven.Sdk`) and
+the portable core (`Haiven.Sdk.Core`) from source under `Runtime/` and
+`Runtime/Core`. Do not publish `Haiven.Sdk.Core.dll` or its NuGet neighbors
+into `host/Assets/Plugins`: Unity rejects a precompiled assembly and an
+assembly definition that share the name `Haiven.Sdk.Core`. No replacement
+socket or fake Unity API is compiled into this host.
 
 ## Runner setup and activation
 

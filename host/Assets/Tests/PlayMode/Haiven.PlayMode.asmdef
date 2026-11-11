@@ -1,7 +1,8 @@
 {
   "name": "Haiven.PlayMode",
   "references": [
-    
+    "Haiven.Sdk",
+    "Haiven.Sdk.Core"
   ],
   "optionalUnityReferences": [
     "TestAssemblies"
