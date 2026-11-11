@@ -26,7 +26,7 @@
   "packages": {
     ".": {
       "package-name": "haiven-sdk-unity",
-      "initial-version": "0.0.0",
+      "initial-version": "0.0.1",
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
         {
