@@ -76,6 +76,30 @@ changelog pull request against `main`. Merging that pull request tags
 `v<version>` and publishes the GitHub release; the `Release` workflow
 then attaches the package assets.
 
+Merge nothing into `sdk-dev` from the promotion merge until the release
+pull request merges. Release Please reads `main` back to the latest
+release and stops there. A commit that `sdk-dev` took before the release
+merged is older than the release, so the next promotion brings it to
+`main` but Release Please never reads it, and it misses `CHANGELOG.md`
+and the version bump.
+
+If a commit lands in that window anyway, add an override block to the
+next promotion pull request's description, outside the generated block,
+before that promotion merges. List each commit that landed in the window
+by its conventional subject:
+
+```text
+BEGIN_COMMIT_OVERRIDE
+fix(scope): subject of the first missed commit
+
+feat(scope): subject of the second missed commit
+END_COMMIT_OVERRIDE
+```
+
+Release Please reads the block in place of the promotion's merge commit
+message, so the listed commits reach the next release. List only the
+commits from the window; Release Please reads later commits on its own.
+
 ### Back-merge
 
 After the release pull request merges, merge `main` back into `sdk-dev`

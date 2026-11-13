@@ -61,4 +61,8 @@ jobs:
             Merge with a **merge commit**, not squash or rebase. `main` then
             holds each of these commits, release-please lists them in the next
             release pull request, and the next promotion starts where this one
-            ends. See CONTRIBUTING.md for the release and back-merge steps.
+            ends. If `sdk-dev` took a commit after the previous promotion
+            merged and before its release merged, list that commit in a commit
+            override block in this description before merging; see
+            CONTRIBUTING.md for the block and for the release and back-merge
+            steps.
