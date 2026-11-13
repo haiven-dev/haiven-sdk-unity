@@ -125,11 +125,12 @@ jobs:
                 echo "no built release assets to upload" >&2
                 exit 1
               fi
-              gh release upload "$TAG" "${assets[@]}"
               # release-please publishes with prerelease: false, so a prerelease tag would otherwise become Latest.
+              # Mark it before uploading: if the edit fails, nothing is uploaded and a rerun takes this branch again.
               if [[ "$TAG" =~ $prerelease_tag_re ]]; then
                 gh release edit "$TAG" --prerelease
               fi
+              gh release upload "$TAG" "${assets[@]}"
             else
               # Do not --clobber. That deletes each asset before the replacement
               # upload, and a moved tag would change bytes under an existing version.
