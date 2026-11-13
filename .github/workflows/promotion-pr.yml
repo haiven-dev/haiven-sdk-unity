@@ -1,0 +1,68 @@
+name: Promotion PR
+
+# Keeps one open pull request that promotes sdk-dev into main. Its description
+# lists the conventional commits sdk-dev carries that main lacks, grouped by
+# type, and is refreshed on every push to sdk-dev or main. Text outside the
+# generated block is kept.
+#
+# The pull request head is sdk-dev itself. This workflow pushes no branch,
+# never merges, and never versions, tags, or releases. Merge the promotion with
+# a merge commit so main holds each sdk-dev commit; release-please on main then
+# reads those commits for the release pull request and CHANGELOG.md.
+#
+# A push runs the workflow file of the branch it lands on: runs on main start
+# once this file is on main, and runs on sdk-dev once main has been merged
+# back into sdk-dev. Dispatch it by hand to refresh the pull request at any
+# time.
+
+on:
+  push:
+    branches: [sdk-dev, main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: promotion-pr-sdk-dev-main
+  cancel-in-progress: false
+
+jobs:
+  promotion-pr:
+    runs-on: ubuntu-latest
+    # The release app token opens and edits the pull request, so GITHUB_TOKEN
+    # only reads for the checkout and fetch.
+    permissions:
+      contents: read
+    steps:
+      # A pull request opened with GITHUB_TOKEN starts no pull_request
+      # workflows. The release app's token, which release-please also uses,
+      # does, so checks run on the promotion pull request. With no owner or
+      # repositories input, the token is scoped to this repository.
+      - name: Mint promotion token
+        id: promotion-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ vars.HAIVEN_RELEASE_APP_ID }}
+          private-key: ${{ secrets.HAIVEN_RELEASE_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Open or refresh the promotion pull request
+        uses: haiven-dev/haiven-actions/actions/promotion-pr@407d8e232ebd2b733db9f9ac2c88ae382fdce149 # main
+        with:
+          token: ${{ steps.promotion-token.outputs.token }}
+          source-branch: sdk-dev
+          target-branch: main
+          title: "chore: promote sdk-dev into main"
+          note: >-
+            Merge with a **merge commit**, not squash or rebase. `main` then
+            holds each of these commits, release-please lists them in the next
+            release pull request, and the next promotion starts where this one
+            ends. If `sdk-dev` took a commit after the previous promotion
+            merged and before its release merged, list that commit in a commit
+            override block in this description before merging; see
+            CONTRIBUTING.md for the block and for the release and back-merge
+            steps.

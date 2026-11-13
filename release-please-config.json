@@ -1,0 +1,40 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "simple",
+  "include-v-in-tag": true,
+  "include-component-in-tag": false,
+  "bump-minor-pre-major": true,
+  "bump-patch-for-minor-pre-major": true,
+  "bootstrap-sha": "e1b1be3a63db9c591471ca82ae94885a071d4499",
+  "draft": false,
+  "prerelease": false,
+  "changelog-sections": [
+    { "type": "feat", "section": "Features" },
+    { "type": "fix", "section": "Bug Fixes" },
+    { "type": "docs", "section": "Documentation" },
+    { "type": "perf", "section": "Performance Improvements" },
+    { "type": "revert", "section": "Reverts" },
+    { "type": "refactor", "section": "Code Refactoring", "hidden": true },
+    { "type": "deps", "section": "Dependencies", "hidden": true },
+    { "type": "test", "section": "Tests", "hidden": true },
+    { "type": "build", "section": "Build System", "hidden": true },
+    { "type": "ci", "section": "Continuous Integration", "hidden": true },
+    { "type": "chore", "section": "Miscellaneous", "hidden": true },
+    { "type": "style", "section": "Styles", "hidden": true },
+    { "type": "wip", "section": "Work in Progress", "hidden": true }
+  ],
+  "packages": {
+    ".": {
+      "package-name": "haiven-sdk-unity",
+      "initial-version": "0.0.1",
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "com.haiven.sdk/package.json",
+          "jsonpath": "$.version"
+        }
+      ]
+    }
+  }
+}
