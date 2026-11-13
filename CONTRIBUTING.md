@@ -76,12 +76,23 @@ changelog pull request against `main`. Merging that pull request tags
 `v<version>` and publishes the GitHub release; the `Release` workflow
 then attaches the package assets.
 
+The first release is `v0.0.1`. It comes from `initial-version` in
+`release-please-config.json`, because `.release-please-manifest.json`
+records no earlier release (`0.0.0`). Its release pull request sets
+`com.haiven.sdk/package.json` `version` to `0.0.1`, replacing the
+`0.1.0-preview.1` that `sdk-dev` declares. To ship a different first
+version, change `initial-version` before the first promotion merges.
+After the first release, Release Please takes the version from the
+manifest and the commits.
+
 Merge nothing into `sdk-dev` from the promotion merge until the release
 pull request merges. Release Please reads `main` back to the latest
 release and stops there. A commit that `sdk-dev` took before the release
 merged is older than the release, so the next promotion brings it to
 `main` but Release Please never reads it, and it misses `CHANGELOG.md`
-and the version bump.
+and the version bump. If Release Please opens no release pull request
+for a promotion, because it holds only hidden types such as `ci`,
+`chore`, and `test`, there is no release to wait for and no hold.
 
 If a commit lands in that window anyway, add an override block to the
 next promotion pull request's description, outside the generated block,
