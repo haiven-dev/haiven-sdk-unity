@@ -7,7 +7,9 @@ name: Release
 # When the tag already has a GitHub release and that release has no uploaded
 # assets, the publish job uploads the built files and leaves the existing
 # notes in place. Assets that are already present are never replaced; a byte
-# mismatch fails the job.
+# mismatch fails the job. A rerun after a partial upload checks that every
+# asset already present is byte-identical to this build, then uploads only
+# the missing files.
 #
 # The tag must equal v<com.haiven.sdk/package.json version>, including a
 # prerelease such as v0.1.0-alpha.1. v0.0.0 is rejected. Bump the version on
@@ -136,6 +138,30 @@ jobs:
               # upload, and a moved tag would change bytes under an existing version.
               existing="$(mktemp -d)"
               gh release download "$TAG" -D "$existing"
+              # A rerun after a partial upload finds only some assets. Upload just
+              # the built files the release lacks, after checking that every asset
+              # already present is byte-identical to this build.
+              shopt -s nullglob
+              built=(release/assets/*)
+              present=("$existing"/*)
+              shopt -u nullglob
+              missing=()
+              for file in "${built[@]}"; do
+                [[ -e "$existing/$(basename "$file")" ]] || missing+=("$file")
+              done
+              if [[ "${#missing[@]}" -gt 0 ]]; then
+                for file in "${present[@]}"; do
+                  name="$(basename "$file")"
+                  if ! cmp -s "$file" "release/assets/$name"; then
+                    echo "release asset ${name} on ${TAG} differs from this build or is not part of it" >&2
+                    exit 1
+                  fi
+                done
+                gh release upload "$TAG" "${missing[@]}"
+                existing="$(mktemp -d)"
+                gh release download "$TAG" -D "$existing"
+              fi
+              # Verify the full published set, including any files just uploaded.
               python3 haiven-sdk-unity/ci/release.py --out release/assets --compare-to "$existing"
             fi
           else
