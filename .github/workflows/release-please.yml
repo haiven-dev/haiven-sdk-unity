@@ -1,9 +1,10 @@
 name: release-please
 
-# Runs on main alone (the haiven-docs contribution standard): sdk-dev takes the work,
-# an sdk-dev -> main promotion lands it, and this opens the release pull request that
-# bumps com.haiven.sdk/package.json at $.version, CHANGELOG.md, and the manifest.
-# Merging that pull request tags v<version> and publishes the GitHub release.
+# Runs on main alone. sdk-dev takes the work, and the promotion pull request kept
+# open by promotion-pr.yml lands it on main with a merge commit. This then opens
+# the release pull request that bumps com.haiven.sdk/package.json at $.version,
+# CHANGELOG.md, and the manifest. Merging that pull request tags v<version> and
+# publishes the GitHub release.
 on:
   push:
     branches: [main]

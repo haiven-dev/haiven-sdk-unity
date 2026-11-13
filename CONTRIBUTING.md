@@ -31,8 +31,9 @@ endpoints.
    checked it.
 
 `main` is the release branch. Do not open feature pull requests against
-it. Ready work lands on `main` only through the promotion dispatch
-below, and then through the Release Please pull request that follows.
+it. Ready work reaches `main` only through the promotion pull request
+below, and is released through the Release Please pull request that
+follows.
 
 Do not commit access tokens, passwords, private endpoints, or local
 editor credentials.
@@ -41,74 +42,56 @@ editor credentials.
 
 `sdk-dev` takes ready work. Squash-merge those pull requests. The pull
 request title becomes the commit, and it has to be a conventional
-commit, because that subject is what the promotion records.
+commit, because that subject is what the promotion lists and what
+Release Please reads.
 
 `main` is what gets released. Release Please
-(`.github/workflows/release-please.yml`) runs on `main` only. It cannot
-use `sdk-dev` as its source while opening a release pull request against
-`main`, so a reviewed promotion lands `sdk-dev` on `main` first.
+(`.github/workflows/release-please.yml`) runs on `main` only, so the
+promotion lands `sdk-dev` on `main` first.
 
 Topic branches carry unready work. Update them by rebasing onto
 `sdk-dev`.
 
-### Promotion dispatch
+### Promotion pull request
 
-Dispatch the `promote sdk-dev` workflow
-(`.github/workflows/promote-sdk-dev.yml`) by hand from `main`, the ref
-that contains that file. Pass `expected_sdk_dev_sha`: the full lowercase
-40-character `sdk-dev` head to promote. The run stops if `sdk-dev` has
-moved, if `main` is not an ancestor of `sdk-dev`, or if that range has
-no commits.
+The `Promotion PR` workflow (`.github/workflows/promotion-pr.yml`) keeps
+one open pull request from `sdk-dev` into `main`, titled
+`chore: promote sdk-dev into main`. Its description lists the commits
+`sdk-dev` carries that `main` lacks, grouped into breaking changes,
+features, bug fixes, and other changes. The workflow runs on every push
+to `sdk-dev` or `main` and can also be dispatched by hand. It rewrites
+only the generated block between its markers, so notes added outside
+that block are kept. It does not push branches, merge, version, tag, or
+release.
 
-```sh
-git fetch origin
-gh workflow run "promote sdk-dev" --ref main \
-  -f expected_sdk_dev_sha="$(git rev-parse origin/sdk-dev)"
-```
+The pull request head is `sdk-dev` itself. Review it like any other pull
+request, then merge it with **Create a merge commit**, not squash or
+rebase. `main` then holds each `sdk-dev` commit, Release Please reads
+them individually, and the next promotion lists only newer commits.
 
-The workflow publishes a disposable branch `promote/sdk-dev-<sha>` at
-that exact commit and opens or refreshes a pull request titled
-`chore: promote sdk-dev to main` against `main`. It does not merge. It
-does not delete or reset `sdk-dev`. It closes older open
-`promote/sdk-dev-*` pull requests and leaves their branches in place.
-The disposable head may be deleted on merge. `sdk-dev` is not.
-
-The pull request body lists the range inside `BEGIN_COMMIT_OVERRIDE`.
-Each commit is a `BEGIN_NESTED_COMMIT` that keeps the subject and any
-`BREAKING CHANGE:`, `BREAKING-CHANGE:`, or `Release-As:` line. Squash-merge
-the promotion. Release Please reads that block in place of the squash
-commit. The `chore` title stays out of the changelog.
+### Release
 
 After the promotion merges, Release Please opens the version and
 changelog pull request against `main`. Merging that pull request tags
-`v<version>` and publishes the GitHub release.
+`v<version>` and publishes the GitHub release; the `Release` workflow
+then attaches the package assets.
 
-### Reset steps
+### Back-merge
 
-Reset `sdk-dev` to `main` only after the release pull request has
-merged, not after the promotion. `main` then has the squashed promotion
-and the Release Please version bump, and one reset covers both. The
-promotion workflow never performs this reset.
-
-`<promoted-sdk-dev-sha>` is the `sdk-dev` head the promotion recorded
-(`expected_sdk_dev_sha`). Guard the force-with-lease with that sha:
+After the release pull request merges, merge `main` back into `sdk-dev`
+with a merge commit so `sdk-dev` carries the version bump and
+`CHANGELOG.md`. Merge commits are left out of the promotion list, so
+this does not show up in the next promotion.
 
 ```sh
-git fetch origin
-git push --force-with-lease=sdk-dev:<promoted-sdk-dev-sha> origin origin/main:refs/heads/sdk-dev
+gh pr create --base sdk-dev --head main \
+  --title "chore: merge main back into sdk-dev" \
+  --body "Back-merge after the release."
 ```
 
-If anything landed on `sdk-dev` after that sha, the lease refuses the
-push. Replay only the newer commits, then push with a lease on the
-current `sdk-dev` head:
-
-```sh
-git rebase --onto origin/main <promoted-sdk-dev-sha> origin/sdk-dev
-git push --force-with-lease=sdk-dev:<current-sdk-dev-sha> origin HEAD:refs/heads/sdk-dev
-```
-
-Move an open topic branch onto the new `sdk-dev` with
-`git rebase --onto origin/sdk-dev <old-sdk-dev-sha>`.
+Merge that pull request with **Create a merge commit**. `sdk-dev` is
+never reset or force-pushed, so open topic branches need no special
+handling.
 
 ## Checks
 
