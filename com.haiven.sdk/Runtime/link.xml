@@ -1,7 +1,4 @@
 <!--
-  Copyright 2026 Haiven
-  SPDX-License-Identifier: Apache-2.0
-
   Preserves the Haiven.Sdk assembly (this package's Runtime asmdef: WebGlSocket,
   UnityHandoff) from IL2CPP managed stripping.
 

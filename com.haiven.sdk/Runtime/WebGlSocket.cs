@@ -1,6 +1,3 @@
-// Copyright 2026 Haiven
-// SPDX-License-Identifier: Apache-2.0
-
 #if UNITY_WEBGL && !UNITY_EDITOR
 #nullable enable
 using System;

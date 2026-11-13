@@ -9,6 +9,11 @@ the Apache License, Version 2.0 (SPDX `Apache-2.0`). The terms are in
 [`LICENSE`](LICENSE). The same text is at the repository root and covers the
 host, CI, and core project files in this repository.
 
+Source files do not carry per-file license headers. `LICENSE` covers every
+file in the package. Most of `Runtime/Core` is generated or copied from the
+Haiven SDK source, and a header added only here would be lost the next time
+that code is copied in.
+
 This package does not contain Unity Technologies source code. It is Haiven
 code that calls Unity APIs. Unity editor assemblies and `com.unity.*` package
 source are not redistributed here.
