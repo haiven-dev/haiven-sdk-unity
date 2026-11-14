@@ -3,6 +3,7 @@
   "version": "0.1.0-preview.1",
   "displayName": "Haiven SDK",
   "description": "Client SDK for Haiven WebSocket and game login handoff APIs in Unity, including WebGL.",
+  "license": "Apache-2.0",
   "unity": "2022.3",
   "documentationUrl": "https://github.com/haiven-dev/haiven-sdk-unity/blob/main/com.haiven.sdk/README.md",
   "keywords": [

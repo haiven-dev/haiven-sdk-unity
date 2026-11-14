@@ -2,7 +2,7 @@
 
 Contributions are welcome. This repository is public. Bug reports, fixes,
 and documentation improvements are all useful. Contributions are accepted
-under the repository license once it is recorded.
+under the Apache License, Version 2.0. See [LICENSE](LICENSE).
 
 The UPM package is `com.haiven.sdk` at the root of this repository.
 

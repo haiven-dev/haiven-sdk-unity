@@ -60,6 +60,17 @@ for (const field of ["version", "displayName", "description", "unity"]) {
 // Reject malformed identifiers instead of silently sorting them unpredictably.
 check(isValidPackageVersion(manifest.version), `version is not valid semver: ${manifest.version}`)
 
+// Haiven's package source is Apache-2.0. The identifier has to match the
+// LICENSE file that ships inside the package, because the UPM tarball does
+// not include the repository-root copy.
+check(manifest.license === "Apache-2.0", `package.json license must be Apache-2.0, found ${manifest.license}`)
+const licensePath = join(PACKAGE, "LICENSE")
+check(existsSync(licensePath), "package has no LICENSE")
+if (existsSync(licensePath)) {
+	const license = readFileSync(licensePath, "utf8")
+	check(license.includes("Apache License") && license.includes("Version 2.0, January 2004"), "package LICENSE is not Apache-2.0")
+}
+
 // The minimum editor version is declared as MAJOR.MINOR with no patch. Unity
 // rejects a three-part value here, which is easy to write and fails at import.
 check(/^\d{4}\.\d+$/.test(manifest.unity), `unity must be MAJOR.MINOR: ${manifest.unity}`)

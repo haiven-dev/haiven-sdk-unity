@@ -196,6 +196,6 @@ That check is not a substitute for opening the package in the Editor. Say
 which checks you ran. Do not commit access tokens, passwords, private
 endpoints, or local editor credentials.
 
-This repository does not yet have a license file. Contributions are accepted
-under the repository license once that file is recorded, as
-[CONTRIBUTING.md](CONTRIBUTING.md) says.
+Haiven source in this repository is licensed under the Apache License,
+Version 2.0. See [LICENSE](LICENSE). Contributions are accepted under that
+license, as [CONTRIBUTING.md](CONTRIBUTING.md) says.
