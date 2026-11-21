@@ -8,15 +8,12 @@ package must not also import a prebuilt `Haiven.Sdk.Core` assembly.
 
 Documentation: <https://docs.haiven.gg>. The Unity guide is
 <https://docs.haiven.gg/engines/unity>. The `haiven` command-line tool is
-<https://docs.haiven.gg/install/cli>. `docs.haiven.gg` is the
-production host. Until it is published, the same paths are served at
-<https://docs.sbx.haiven.gg>.
+<https://docs.haiven.gg/install/cli>.
 
 The project you can open today is
-[haiven-sdk-unity-bossroom](https://github.com/haiven-dev/haiven-sdk-unity-bossroom):
-Unity's Boss Room sample with the Haiven demo packages embedded. This
-repository has no GitHub release yet; [Releases](#releases) says how they are
-published.
+[haiven-sdk-unity-bossroom](https://github.com/haiven-dev/haiven-sdk-unity-bossroom),
+Unity's Boss Room sample with the Haiven demo packages embedded.
+For an existing Unity project, see [Add the package to your own project](#add-the-package-to-your-own-project).
 
 ## Install Unity Hub and the Editor
 
@@ -75,10 +72,10 @@ folder that contains `Assets`). A non-empty field in that asset is used
 before `.env`. The Boss Room clone has no `Haiven/HaivenDemoConfiguration`
 resource, so that file is not a source. Unity Hub does not pass variables
 from a shell you export later, and it does not load `.env`. A stock Hub
-open uses the asset. The sandbox `.env` below does not configure that open
+open uses the asset. The production `.env` below does not configure that open
 by itself.
 
-The committed asset is a local stack, not the sandbox:
+The committed asset points to the local stack:
 
 - `baseUrl` is `http://127.0.0.1:18480/v0`
 - `realtimeUrl` is `ws://127.0.0.1:18480/v0/ws`
@@ -107,15 +104,15 @@ Do not commit `.env`. Do not put an access token, an integration key, or
 `HAIVEN_DEMO_ACCESS_TOKEN` in `.env` or in the asset. The player signs in
 at runtime, and the token stays in memory.
 
-Ask the Haiven app owner for the ids. Sandbox hosts are below. The
+Ask the Haiven app owner for the ids. Production hosts are below. The
 integration must allow the redirect exactly, including the port. The
 default, already stored in `redirectUri`, is
 `http://127.0.0.1:47615/haiven/callback`. Use `127.0.0.1`, not
 `localhost`.
 
 ```dotenv
-HAIVEN_DEMO_BASE_URL=https://sbx.haiven.gg/v0
-HAIVEN_DEMO_REALTIME_URL=wss://sbx.haiven.gg/v0/ws
+HAIVEN_DEMO_BASE_URL=https://haiven.gg/v0
+HAIVEN_DEMO_REALTIME_URL=wss://haiven.gg/v0/ws
 HAIVEN_DEMO_APP_ID=<app id>
 HAIVEN_DEMO_INTEGRATION_ID=<public integration id>
 HAIVEN_DEMO_CHANNEL_ID=<channel id>
@@ -123,8 +120,8 @@ HAIVEN_DEMO_REWARD_REF=<reward ref>
 ```
 
 `HAIVEN_DEMO_SIGN_IN_URL` is optional when `signInUrl` in the asset is
-empty and the sign-in page shares the API host. For the sandbox that is
-`https://sbx.haiven.gg/connect/game`. The shipped `signInUrl` blocks that
+empty and the sign-in page shares the API host. In production that is
+`https://haiven.gg/connect/game`. The shipped `signInUrl` blocks that
 default, so the browser opens `http://127.0.0.1:3000/connect/game` until
 the field is cleared or the Editor process sets the variable.
 `HAIVEN_DEMO_COMMUNITY_ID` is optional and is the chat channel's
@@ -138,27 +135,30 @@ and names it.
 
 ## Add the package to your own project
 
-Not yet. This repository has no release yet. What a release ships:
+### Release download
 
-- `com.haiven.sdk-<version>.tgz`: the package in `npm pack` layout. It
-  carries the package's `.meta` files. Unity does not generate them for a git
-  or tarball package, and it ignores assets that have none.
-- The bridge calls types that live in the C# core (`IHaivenSocket` and the
-  handoff types). The package compiles that core from `Runtime/Core`, so it
-  needs no DLLs. Do not also import a prebuilt core assembly into a project
-  that uses the package: Unity rejects a precompiled assembly and an asmdef
-  that share a name.
+Download `com.haiven.sdk-0.1.0-preview.1.tgz` from the
+[Unity SDK release](https://github.com/haiven-dev/haiven-sdk-unity/releases/tag/v0.1.0-preview.1).
+Use **Package Manager → + → Add package from tarball** and select the file.
+Verify the tarball with the release's `SHA256SUMS`.
 
-When a release exists, its tag is `v` plus the `version` in
-`com.haiven.sdk/package.json` (for example `v0.1.0`, not `v0.0.0`). In
-Unity Hub, open your project with **6000.0.52f1**. Then use
-**Package Manager → + → Add package from tarball**, and choose
-`com.haiven.sdk-<version>.tgz`.
+### Tagged source
 
-Check `SHA256SUMS` from the release before you install. Commit the package
-files or manifest entry the Editor writes. Install a release tag's
-archives. A git URL, including a commit on this repository today, is not a
-release install. Do not pin a branch name.
+Add this package to the `dependencies` object in `Packages/manifest.json`.
+
+```json
+"com.haiven.sdk": "https://github.com/haiven-dev/haiven-sdk-unity.git?path=/com.haiven.sdk#v0.1.0-preview.1"
+```
+
+Open the project in Unity and commit `manifest.json` and `packages-lock.json`.
+The UPM package includes the source core and the metadata Unity needs.
+
+### Standalone .NET core
+
+For a standalone .NET project that supports .NET Standard 2.1, download
+`haiven-unity-core-portable.tar.gz` from the same release and extract
+`Haiven.Sdk.Core.dll`. Add the DLL as an assembly reference. Its checksum is
+in `SHA256SUMS.binaries`. Use the UPM package above for Unity projects.
 
 ## Releases
 
@@ -169,9 +169,9 @@ pipeline builds and publishes every release from that source after a
 maintainer review. Nothing in this repository cuts a release: there is no
 release workflow, release pull request, or tag to push here.
 
-Each release carries `com.haiven.sdk-<version>.tgz` and `SHA256SUMS`, the
-SHA-256 digest of every asset in `sha256sum` format. The release notes list
-each asset with its digest and name the source commit it was built from.
+Each release carries `com.haiven.sdk-<version>.tgz` and its digest in
+`SHA256SUMS`. Releases with supplemental binaries include
+`SHA256SUMS.binaries`. The release notes name the source commit.
 
 Versions follow [Semantic Versioning](https://semver.org/). A release is
 tagged `v<version>`, and `version` in the released package's `package.json`
